@@ -1,3 +1,4 @@
+using FluentValidation;
 using Mapster;
 using MinhaApi.CrossCutting.Exceptions;
 using MinhaApi.DataTransfer.Common;
@@ -8,7 +9,10 @@ using MinhaApi.Domain.Repositories;
 
 namespace MinhaApi.Application.Services;
 
-public class ProdutoService(IProdutoRepository repository) : IProdutoService
+public class ProdutoService(
+    IProdutoRepository repository,
+    IValidator<CriarProdutoRequest> criarValidator,
+    IValidator<AtualizarProdutoRequest> atualizarValidator) : IProdutoService
 {
     public async Task<ProdutoResponse> ObterPorIdAsync(long id, CancellationToken cancellationToken = default)
     {
@@ -39,6 +43,12 @@ public class ProdutoService(IProdutoRepository repository) : IProdutoService
 
     public async Task<ProdutoResponse> CriarAsync(CriarProdutoRequest request, CancellationToken cancellationToken = default)
     {
+        var validacao = await criarValidator.ValidateAsync(request, cancellationToken);
+        if (!validacao.IsValid)
+        {
+            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+        }
+
         var produto = new Produto(request.Nome, request.Preco);
 
         await repository.InserirAsync(produto, cancellationToken);
@@ -48,6 +58,12 @@ public class ProdutoService(IProdutoRepository repository) : IProdutoService
 
     public async Task<ProdutoResponse> AtualizarAsync(long id, AtualizarProdutoRequest request, CancellationToken cancellationToken = default)
     {
+        var validacao = await atualizarValidator.ValidateAsync(request, cancellationToken);
+        if (!validacao.IsValid)
+        {
+            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+        }
+
         var produto = await repository.ObterPorIdAsync(id, cancellationToken)
             ?? throw new NaoEncontradoException<Produto>(id);
 

@@ -15,6 +15,10 @@ public static class NHibernateConfiguration
         return Fluently.Configure()
             .Database(MySQLConfiguration.Standard
                 .ConnectionString(connectionString)
+                // Driver do pacote NHibernate.Driver.MySqlConnector (separado do NHibernate
+                // core) - usamos ele porque nosso ADO.NET provider e o MySqlConnector, nao
+                // o MySql.Data oficial da Oracle que o MySqlDataDriver padrao espera.
+                .Driver<NHibernate.Driver.MySqlConnector.MySqlConnectorDriver>()
                 .Dialect<MySQL8Dialect>())
             .Mappings(m => m.FluentMappings.AddFromAssemblyOf<ProdutoMap>())
             .ExposeConfiguration(cfg =>
