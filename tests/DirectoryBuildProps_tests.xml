@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <!-- Nomes de teste com underscore (Metodo_Cenario_Resultado) sao uma convencao
+         proposital de legibilidade, nao um erro de nomenclatura - desativamos so
+         essa regra aqui, sem afetar o resto da solution. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+</Project>
