@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, hml, dev ]
+  pull_request:
+    branches: [ main, hml, dev ]
+
+jobs:
+  backend:
+    name: Build + testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Testes
+        run: dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: Scan de dependências vulneráveis
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vuln.txt
+          ! grep -q "has the following vulnerable packages" vuln.txt
