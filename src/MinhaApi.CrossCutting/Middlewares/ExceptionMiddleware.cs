@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MinhaApi.CrossCutting.Exceptions;
-using NHibernate;
 
 namespace MinhaApi.CrossCutting.Middlewares;
 
@@ -29,10 +28,12 @@ public partial class ExceptionMiddleware(RequestDelegate next, ILogger<Exception
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        // StaleObjectStateException do NHibernate (concorrencia otimista) agora e
+        // traduzida em ConflitoException direto no RepositorioBase (Infra) - o
+        // CrossCutting nao precisa mais conhecer o NHibernate pra tratar isso.
         var statusCode = exception switch
         {
             AppException appException => appException.StatusCode,
-            StaleObjectStateException => StatusCodes.Status409Conflict, // concorrencia otimista, README §7.3
             _ => StatusCodes.Status500InternalServerError
         };
 
@@ -50,9 +51,7 @@ public partial class ExceptionMiddleware(RequestDelegate next, ILogger<Exception
         var problemDetails = new ProblemDetails
         {
             Status = statusCode,
-            Title = exception is StaleObjectStateException
-                ? "O recurso foi modificado por outra operação. Recarregue e tente novamente."
-                : exception.Message,
+            Title = exception.Message,
         };
         problemDetails.Extensions["traceId"] = context.TraceIdentifier;
 

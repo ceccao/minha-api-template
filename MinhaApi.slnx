@@ -3,7 +3,6 @@
     <Project Path="src/MinhaApi.Api/MinhaApi.Api.csproj" />
     <Project Path="src/MinhaApi.Application/MinhaApi.Application.csproj" />
     <Project Path="src/MinhaApi.CrossCutting/MinhaApi.CrossCutting.csproj" />
-    <Project Path="src/MinhaApi.DataTransfer/MinhaApi.DataTransfer.csproj" />
     <Project Path="src/MinhaApi.Domain/MinhaApi.Domain.csproj" />
     <Project Path="src/MinhaApi.Infra/MinhaApi.Infra.csproj" />
     <Project Path="src/MinhaApi.IoC/MinhaApi.IoC.csproj" />

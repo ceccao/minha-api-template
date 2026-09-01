@@ -16,7 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="..\MinhaApi.IoC\MinhaApi.IoC.csproj" />
     <ProjectReference Include="..\MinhaApi.Application\MinhaApi.Application.csproj" />
-    <ProjectReference Include="..\MinhaApi.DataTransfer\MinhaApi.DataTransfer.csproj" />
     <ProjectReference Include="..\MinhaApi.CrossCutting\MinhaApi.CrossCutting.csproj" />
   </ItemGroup>
 
