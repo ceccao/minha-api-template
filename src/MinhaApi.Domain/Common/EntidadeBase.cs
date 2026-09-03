@@ -1,8 +1,8 @@
-namespace MinhaApi.Domain.Entities;
+namespace MinhaApi.Domain.Common;
 
 public abstract class EntidadeBase
 {
-    public virtual long Id { get; protected set; }
+    public virtual int Id { get; protected set; }
     public virtual bool Ativo { get; protected set; } = true;
     public virtual DateTime CriadoEm { get; protected set; } = DateTime.UtcNow;
     public virtual DateTime? AtualizadoEm { get; protected set; }

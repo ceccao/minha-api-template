@@ -1,12 +1,26 @@
+using System.Linq.Expressions;
+
 namespace MinhaApi.Domain.Abstractions;
 
 public interface IRepositorioBase<TEntidade> where TEntidade : class
 {
-    Task<TEntidade?> RecuperarAsync(long id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<TEntidade>> ObterTodosAsync(CancellationToken cancellationToken = default);
     Task InserirAsync(TEntidade entidade, CancellationToken cancellationToken = default);
     Task InserirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default);
-    Task AtualizarAsync(TEntidade entidade, CancellationToken cancellationToken = default);
+    Task EditarAsync(TEntidade entidade, CancellationToken cancellationToken = default);
     Task ExcluirAsync(TEntidade entidade, CancellationToken cancellationToken = default);
-    Task ExcluirPorIdAsync(long id, CancellationToken cancellationToken = default);
+    Task ExcluirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default);
+    Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default);
+    Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default);
+
+    Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        PaginacaoFiltro paginacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default);
+
+    Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        int qt,
+        int pg,
+        (string Campo, TipoOrdenacao Tipo)[] ordenacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default);
 }

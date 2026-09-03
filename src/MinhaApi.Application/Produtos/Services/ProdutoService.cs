@@ -1,6 +1,7 @@
 using FluentValidation;
 using Mapster;
 using MinhaApi.Application.Common;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
 using MinhaApi.Application.Produtos.Services.Interfaces;
 using MinhaApi.CrossCutting.Exceptions;
@@ -15,7 +16,7 @@ public class ProdutoService(
     IValidator<CriarProdutoCommand> criarValidator,
     IValidator<AtualizarProdutoCommand> atualizarValidator) : IProdutoService
 {
-    public async Task<ProdutoResponse> ObterPorIdAsync(long id, CancellationToken cancellationToken = default)
+    public async Task<ProdutoResponse> ObterPorIdAsync(int id, CancellationToken cancellationToken = default)
     {
         var produto = await repository.RecuperarAsync(id, cancellationToken)
             ?? throw new NaoEncontradoException<Produto>(id);
@@ -27,16 +28,24 @@ public class ProdutoService(
         return produto.Adapt<ProdutoResponse>();
     }
 
-    public async Task<PagedResult<ProdutoResponse>> ObterTodosAsync(PaginacaoRequest paginacao, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<ProdutoResponse>> ObterTodosAsync(ListarProdutosRequest request, CancellationToken cancellationToken = default)
     {
-        var produtos = (await repository.ObterTodosAsync(cancellationToken)).ToList();
+        // Um unico predicado combinado, com cada condicao opcional "neutralizada"
+        // quando o filtro correspondente nao foi informado - nao precisa de
+        // biblioteca de combinacao de Expression, o NHibernate resolve isso como
+        // um WHERE so com os AND/OR corretos.
+        var resultado = await repository.ListarAsync(
+            request,
+            p =>
+                (string.IsNullOrWhiteSpace(request.Nome) || p.Nome.Contains(request.Nome)) &&
+                (!request.PrecoMinimo.HasValue || p.Preco >= request.PrecoMinimo.Value) &&
+                (!request.PrecoMaximo.HasValue || p.Preco <= request.PrecoMaximo.Value) &&
+                (!request.Ativo.HasValue || p.Ativo == request.Ativo.Value),
+            cancellationToken);
 
-        var itens = produtos
-            .Skip((paginacao.Pagina - 1) * paginacao.TamanhoPagina)
-            .Take(paginacao.TamanhoPagina)
-            .Adapt<List<ProdutoResponse>>();
+        var itens = resultado.Itens.Adapt<List<ProdutoResponse>>();
 
-        return new PagedResult<ProdutoResponse>(itens, paginacao.Pagina, paginacao.TamanhoPagina, produtos.Count);
+        return new PagedResult<ProdutoResponse>(itens, resultado.Pagina, resultado.TamanhoPagina, resultado.TotalItens);
     }
 
     public async Task<ProdutoResponse> CriarAsync(CriarProdutoCommand command, CancellationToken cancellationToken = default)
@@ -68,28 +77,22 @@ public class ProdutoService(
         produto.AtualizarNome(command.Nome);
         produto.AtualizarPreco(command.Preco);
 
-        // NHibernate compara o Version carregado agora contra o que estiver no banco
-        // no momento do flush - se outra requisicao mudou o registro nesse meio tempo,
-        // o RepositorioBase (Infra) traduz isso em ConflitoException, que o
-        // ExceptionMiddleware converte pra 409.
-        await repository.AtualizarAsync(produto, cancellationToken);
+        await repository.EditarAsync(produto, cancellationToken);
 
         return produto.Adapt<ProdutoResponse>();
     }
 
-    public async Task ExcluirAsync(long id, CancellationToken cancellationToken = default)
+    public async Task ExcluirAsync(int id, CancellationToken cancellationToken = default)
     {
         var produto = await repository.RecuperarAsync(id, cancellationToken)
             ?? throw new NaoEncontradoException<Produto>(id);
 
-        // Soft delete (README §5.5): usa o Desativar() da EntidadeBase em vez de
-        // excluir a linha de verdade.
         produto.Desativar();
-        await repository.AtualizarAsync(produto, cancellationToken);
+        await repository.EditarAsync(produto, cancellationToken);
     }
 
     public async Task<Result<ProdutoResponse>> AtualizarPrecoComRetryAsync(
-        long id, decimal novoPreco, int maxTentativas = 3, CancellationToken cancellationToken = default)
+        int id, decimal novoPreco, int maxTentativas = 3, CancellationToken cancellationToken = default)
     {
         for (var tentativa = 1; tentativa <= maxTentativas; tentativa++)
         {
@@ -99,16 +102,12 @@ public class ProdutoService(
                     ?? throw new NaoEncontradoException<Produto>(id);
 
                 produto.AtualizarPreco(novoPreco);
-                await repository.AtualizarAsync(produto, cancellationToken);
+                await repository.EditarAsync(produto, cancellationToken);
 
                 return Result.Ok(produto.Adapt<ProdutoResponse>());
             }
             catch (ConflitoException)
             {
-                // Outra requisicao mudou o preco no meio do caminho. Se ainda sobrar
-                // tentativa, o loop recarrega o estado mais recente (RecuperarAsync de
-                // novo) e tenta outra vez; senao, desiste e devolve Falha - o chamador
-                // decide o proximo passo (isso e o Result Pattern na pratica, README §5.1).
                 if (tentativa == maxTentativas)
                 {
                     return Result.Falha<ProdutoResponse>(
@@ -117,8 +116,6 @@ public class ProdutoService(
             }
         }
 
-        // Inalcancavel (o loop sempre retorna ou cai no "if" acima), mas o compilador
-        // exige um caminho de retorno.
         return Result.Falha<ProdutoResponse>("Erro inesperado ao atualizar o preço.");
     }
 }

@@ -13,15 +13,16 @@ namespace MinhaApi.Api.Controllers.V1.Produtos;
 [Produces("application/json")]
 public class ProdutosController(IProdutoService service) : ControllerBase
 {
+    // Ex: GET /api/v1/produtos?qt=20&pg=1&cpOrd=Nome&tpOrd=Descendente&nome=tec
     [HttpGet]
     [ProducesResponseType<PagedResult<ProdutoResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ObterTodos([FromQuery] PaginacaoRequest paginacao, CancellationToken ct)
-        => Ok(await service.ObterTodosAsync(paginacao, ct));
+    public async Task<IActionResult> ObterTodos([FromQuery] ListarProdutosRequest request, CancellationToken ct)
+        => Ok(await service.ObterTodosAsync(request, ct));
 
-    [HttpGet("{id:long}")]
+    [HttpGet("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> ObterPorId(long id, CancellationToken ct)
+    public async Task<IActionResult> ObterPorId(int id, CancellationToken ct)
         => Ok(await service.ObterPorIdAsync(id, ct));
 
     [HttpPost]
@@ -34,24 +35,21 @@ public class ProdutosController(IProdutoService service) : ControllerBase
         return CreatedAtAction(nameof(ObterPorId), new { id = produto.Id }, produto);
     }
 
-    [HttpPut("{id:long}")]
+    [HttpPut("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Atualizar(long id, AtualizarProdutoRequest request, CancellationToken ct)
+    public async Task<IActionResult> Atualizar(int id, AtualizarProdutoRequest request, CancellationToken ct)
     {
         var command = new AtualizarProdutoCommand(id, request.Nome, request.Preco);
         return Ok(await service.AtualizarAsync(command, ct));
     }
 
-    // Exemplo de endpoint que consome um fluxo baseado em Result<T> (README §5.1/§8.2):
-    // o Service tenta novamente sozinho em caso de conflito de concorrencia, e so aqui,
-    // na borda da API, o resultado (Sucesso/Falha) vira de fato um status HTTP.
-    [HttpPatch("{id:long}/preco")]
+    [HttpPatch("{id:int}/preco")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> AtualizarPreco(long id, AtualizarPrecoRequest request, CancellationToken ct)
+    public async Task<IActionResult> AtualizarPreco(int id, AtualizarPrecoRequest request, CancellationToken ct)
     {
         var resultado = await service.AtualizarPrecoComRetryAsync(id, request.NovoPreco, cancellationToken: ct);
 
@@ -67,10 +65,10 @@ public class ProdutosController(IProdutoService service) : ControllerBase
         return Ok(resultado.Valor);
     }
 
-    [HttpDelete("{id:long}")]
+    [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Excluir(long id, CancellationToken ct)
+    public async Task<IActionResult> Excluir(int id, CancellationToken ct)
     {
         await service.ExcluirAsync(id, ct);
         return NoContent();

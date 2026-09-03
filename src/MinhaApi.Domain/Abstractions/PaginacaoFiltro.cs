@@ -1,0 +1,44 @@
+namespace MinhaApi.Domain.Abstractions;
+
+// Consolida quantidade/pagina/ordenacao num objeto so, usado pelo ListarAsync do
+// IRepositorioBase<T>. Nao tem metodo de montar SQL/ORDER BY como texto de proposito
+// - isso seria concatenar string em SQL (README §6.1, SQL Injection). A ordenacao de
+// verdade e resolvida com System.Linq.Dynamic.Core dentro do RepositorioBase, que
+// valida o nome da propriedade contra a entidade antes de montar a query.
+public class PaginacaoFiltro
+{
+    private const int QuantidadeMaxima = 100;
+    private const int QuantidadePadrao = 10;
+
+    private int _qt = QuantidadePadrao;
+    private int _pg = 1;
+
+    public int Qt
+    {
+        get => _qt;
+        // Teto de 100 (protecao contra payload malicioso/DoS, README §6.2). Piso de 1
+        // adicionado - valor negativo ou zero quebraria o Skip/Take no repositorio.
+        set => _qt = value switch
+        {
+            < 1 => QuantidadePadrao,
+            > QuantidadeMaxima => QuantidadeMaxima,
+            _ => value
+        };
+    }
+
+    public int Pg
+    {
+        get => _pg;
+        set => _pg = value < 1 ? 1 : value;
+    }
+
+    public string CpOrd { get; set; }
+
+    public TipoOrdenacao TpOrd { get; set; }
+
+    public PaginacaoFiltro(string cpOrd, TipoOrdenacao tpOrd = TipoOrdenacao.Ascendente)
+    {
+        CpOrd = cpOrd;
+        TpOrd = tpOrd;
+    }
+}

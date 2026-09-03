@@ -1,4 +1,4 @@
-using MinhaApi.Domain.Entities;
+using MinhaApi.Domain.Common;
 
 namespace MinhaApi.Domain.Produtos.Entities;
 

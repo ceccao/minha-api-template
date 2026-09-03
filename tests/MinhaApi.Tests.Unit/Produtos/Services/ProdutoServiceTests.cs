@@ -10,7 +10,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Xunit;
 
-namespace MinhaApi.Tests.Unit.Application.Produtos;
+namespace MinhaApi.Tests.Unit.Produtos.Services;
 
 public class ProdutoServiceTests
 {
@@ -23,8 +23,6 @@ public class ProdutoServiceTests
     {
         _sut = new ProdutoService(_repository, _criarValidator, _atualizarValidator);
 
-        // Por padrao, os validators retornam sucesso - os testes que simulam falha
-        // de validacao sobrescrevem isso explicitamente no proprio teste.
         _criarValidator.ValidateAsync(Arg.Any<CriarProdutoCommand>(), Arg.Any<CancellationToken>())
             .Returns(new ValidationResult());
         _atualizarValidator.ValidateAsync(Arg.Any<AtualizarProdutoCommand>(), Arg.Any<CancellationToken>())
@@ -89,7 +87,7 @@ public class ProdutoServiceTests
 
         resultado.Nome.Should().Be("Nome Novo");
         resultado.Preco.Should().Be(200m);
-        await _repository.Received(1).AtualizarAsync(produto, Arg.Any<CancellationToken>());
+        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -104,7 +102,7 @@ public class ProdutoServiceTests
     }
 
     [Fact]
-    public async Task ExcluirAsyncComProdutoExistenteDeveDesativarEChamarAtualizarAsync()
+    public async Task ExcluirAsyncComProdutoExistenteDeveDesativarEChamarEditarAsync()
     {
         var produto = new Produto("Produto", 100m);
         _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
@@ -112,7 +110,7 @@ public class ProdutoServiceTests
         await _sut.ExcluirAsync(1);
 
         produto.Ativo.Should().BeFalse();
-        await _repository.Received(1).AtualizarAsync(produto, Arg.Any<CancellationToken>());
+        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -133,13 +131,13 @@ public class ProdutoServiceTests
     {
         var produto = new Produto("Produto", 100m);
         _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
-        _repository.AtualizarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>())
+        _repository.EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>())
             .Throws(new ConflitoException("Conflito simulado."));
 
         var resultado = await _sut.AtualizarPrecoComRetryAsync(1, 150m, maxTentativas: 2);
 
         resultado.Sucesso.Should().BeFalse();
         resultado.Erro.Should().Contain("2 tentativas");
-        await _repository.Received(2).AtualizarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+        await _repository.Received(2).EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
     }
 }
