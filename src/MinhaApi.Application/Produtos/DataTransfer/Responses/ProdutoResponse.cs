@@ -1,7 +1,7 @@
 namespace MinhaApi.Application.Produtos.DataTransfer.Responses;
 
 public record ProdutoResponse(
-    long Id,
+    int Id,
     string Nome,
     decimal Preco,
     bool Ativo,

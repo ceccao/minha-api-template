@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.OpenApi;
 
 namespace MinhaApi.Api.Configuration;
@@ -14,6 +15,16 @@ public static class SwaggerConfiguration
                 Title = "MinhaApi",
                 Version = "v1"
             });
+
+            // Le o arquivo XML gerado pelo GenerateDocumentationFile (csproj) e
+            // usa os "/// <summary>" das controllers como descricao no Swagger.
+            var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFilename);
+
+            if (File.Exists(xmlPath))
+            {
+                options.IncludeXmlComments(xmlPath);
+            }
         });
 
         return services;

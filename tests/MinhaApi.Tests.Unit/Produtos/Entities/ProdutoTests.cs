@@ -29,6 +29,20 @@ public class ProdutoTests
             .Where(ex => ex.ParamName == "nome");
     }
 
+    [Theory]
+    [InlineData("ab")]     // 2 caracteres - abaixo do minimo
+    [InlineData("Produto com nome bem longo que ultrapassa exatamente o limite de cem caracteres permitidos no campo nome")] // > 100
+    public void ConstructorComNomeForaDoTamanhoPermitidoDeveLancarArgumentException(string nomeInvalido)
+    {
+        // Cobre o bug corrigido: a checagem antiga usava "&&" em vez de "||" e
+        // nunca disparava pra nenhum tamanho de string - esse teste garante que
+        // ambas as pontas (muito curto e muito longo) realmente lancam a exception.
+        var acao = () => new Produto(nomeInvalido, 100m);
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "nome");
+    }
+
     [Fact]
     public void ConstructorComPrecoNegativoDeveLancarArgumentException()
     {
@@ -39,47 +53,47 @@ public class ProdutoTests
     }
 
     [Fact]
-    public void AtualizarNomeComNomeValidoDeveAtualizarNomeEDefinirAtualizadoEm()
+    public void SetNomeComNomeValidoDeveDefinirNomeEAtualizadoEm()
     {
         var produto = new Produto("Nome Original", 100m);
 
-        produto.AtualizarNome("Nome Novo");
+        produto.SetNome("Nome Novo");
 
         produto.Nome.Should().Be("Nome Novo");
         produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
-    public void AtualizarNomeComNomeVazioDeveLancarArgumentException()
+    public void SetNomeComNomeVazioDeveLancarArgumentException()
     {
         var produto = new Produto("Nome Original", 100m);
 
-        var acao = () => produto.AtualizarNome("");
+        var acao = () => produto.SetNome("");
 
         acao.Should().Throw<ArgumentException>()
-            .Where(ex => ex.ParamName == "novoNome");
+            .Where(ex => ex.ParamName == "nome");
     }
 
     [Fact]
-    public void AtualizarPrecoComPrecoValidoDeveAtualizarPrecoEDefinirAtualizadoEm()
+    public void SetPrecoComPrecoValidoDeveDefinirPrecoEAtualizadoEm()
     {
         var produto = new Produto("Produto", 100m);
 
-        produto.AtualizarPreco(200m);
+        produto.SetPreco(200m);
 
         produto.Preco.Should().Be(200m);
         produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
-    public void AtualizarPrecoComPrecoNegativoDeveLancarArgumentException()
+    public void SetPrecoComPrecoNegativoDeveLancarArgumentException()
     {
         var produto = new Produto("Produto", 100m);
 
-        var acao = () => produto.AtualizarPreco(-1m);
+        var acao = () => produto.SetPreco(-1m);
 
         acao.Should().Throw<ArgumentException>()
-            .Where(ex => ex.ParamName == "novoPreco");
+            .Where(ex => ex.ParamName == "preco");
     }
 
     [Fact]

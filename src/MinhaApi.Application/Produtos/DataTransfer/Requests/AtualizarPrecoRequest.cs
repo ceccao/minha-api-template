@@ -1,3 +1,6 @@
 namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
 
-public record AtualizarPrecoRequest(decimal NovoPreco);
+public class AtualizarPrecoRequest
+{
+    public decimal NovoPreco { get; set; }
+}

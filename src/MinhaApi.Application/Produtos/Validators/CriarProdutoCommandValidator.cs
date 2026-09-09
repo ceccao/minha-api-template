@@ -1,14 +1,15 @@
 using FluentValidation;
-using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 
 namespace MinhaApi.Application.Produtos.Validators;
 
-public class CriarProdutoCommandValidator : AbstractValidator<CriarProdutoCommand>
+public class CriarProdutoRequestValidator : AbstractValidator<CriarProdutoRequest>
 {
-    public CriarProdutoCommandValidator()
+    public CriarProdutoRequestValidator()
     {
         RuleFor(x => x.Nome)
             .NotEmpty().WithMessage("Nome é obrigatório.")
+            .MinimumLength(3).WithMessage("Nome deve ter no mínimo 3 caracteres.")
             .MaximumLength(100).WithMessage("Nome deve ter no máximo 100 caracteres.");
 
         RuleFor(x => x.Preco)

@@ -7,38 +7,47 @@ public class Produto : EntidadeBase
     public virtual string Nome { get; protected set; } = string.Empty;
     public virtual decimal Preco { get; protected set; }
 
-    // Construtor sem parametros: exigencia do NHibernate para instanciar via proxy.
-    protected Produto()
-    {
-    }
+    protected Produto() { }
 
     public Produto(string nome, decimal preco)
     {
-        if (string.IsNullOrWhiteSpace(nome))
-            throw new ArgumentException("Nome do produto é obrigatório.", nameof(nome));
-
-        if (preco < 0)
-            throw new ArgumentException("Preço não pode ser negativo.", nameof(preco));
+        ValidarNome(nome);
+        ValidarPreco(preco);
 
         Nome = nome;
         Preco = preco;
     }
 
-    public virtual void AtualizarPreco(decimal novoPreco)
+    public virtual void SetNome(string nome)
     {
-        if (novoPreco < 0)
-            throw new ArgumentException("Preço não pode ser negativo.", nameof(novoPreco));
+        ValidarNome(nome);
 
-        Preco = novoPreco;
+        Nome = nome;
         AtualizadoEm = DateTime.UtcNow;
     }
 
-    public virtual void AtualizarNome(string novoNome)
+    public virtual void SetPreco(decimal preco)
     {
-        if (string.IsNullOrWhiteSpace(novoNome))
-            throw new ArgumentException("Nome do produto é obrigatório.", nameof(novoNome));
+        ValidarPreco(preco);
 
-        Nome = novoNome;
+        Preco = preco;
         AtualizadoEm = DateTime.UtcNow;
+    }
+
+    private static void ValidarNome(string nome)
+    {
+        if (string.IsNullOrWhiteSpace(nome))
+            throw new ArgumentException("Nome do produto é obrigatório.", nameof(nome));
+
+        // Corrigido: era "&&" (nunca disparava - nenhuma string tem tamanho < 3 E > 100
+        // ao mesmo tempo, entao a regra de tamanho nunca era aplicada). O correto e "||".
+        if (nome.Length < 3 || nome.Length > 100)
+            throw new ArgumentException("Nome deve ter no mínimo 3 e máximo 100 caracteres.", nameof(nome));
+    }
+
+    private static void ValidarPreco(decimal preco)
+    {
+        if (preco < 0)
+            throw new ArgumentException("Preço não pode ser negativo.", nameof(preco));
     }
 }

@@ -1,0 +1,1600 @@
+===== src\MinhaApi.Api\Configuration\CorsConfiguration.cs =====
+namespace MinhaApi.Api.Configuration;
+
+public static class CorsConfiguration
+{
+    public const string PoliticaPadrao = "Padrao";
+
+    public static IServiceCollection AddCorsConfigurada(this IServiceCollection services, IConfiguration configuration)
+    {
+        var origensPermitidas = configuration.GetSection("Cors:OrigensPermitidas").Get<string[]>() ?? [];
+
+        services.AddCors(options =>
+            options.AddPolicy(PoliticaPadrao, policy => policy
+                .WithOrigins(origensPermitidas)
+                .AllowAnyHeader()
+                .WithExposedHeaders("X-Correlation-Id") // o front precisa ler esse header
+                .AllowAnyMethod()));
+
+        return services;
+    }
+}
+
+
+===== src\MinhaApi.Api\Configuration\RateLimitConfiguration.cs =====
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
+
+namespace MinhaApi.Api.Configuration;
+
+public static class RateLimitConfiguration
+{
+    public const string PoliticaPadrao = "Padrao";
+
+    public static IServiceCollection AddRateLimitConfigurado(this IServiceCollection services)
+    {
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            options.AddFixedWindowLimiter(PoliticaPadrao, limiterOptions =>
+            {
+                limiterOptions.PermitLimit = 100;
+                limiterOptions.Window = TimeSpan.FromMinutes(1);
+                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+                limiterOptions.QueueLimit = 0;
+            });
+        });
+
+        return services;
+    }
+}
+
+
+===== src\MinhaApi.Api\Configuration\SwaggerConfiguration.cs =====
+using Microsoft.OpenApi;
+
+namespace MinhaApi.Api.Configuration;
+
+public static class SwaggerConfiguration
+{
+    public static IServiceCollection AddSwaggerConfigurado(this IServiceCollection services)
+    {
+        services.AddEndpointsApiExplorer();
+        services.AddSwaggerGen(options =>
+        {
+            options.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "MinhaApi",
+                Version = "v1"
+            });
+        });
+
+        return services;
+    }
+}
+
+
+===== src\MinhaApi.Api\Controllers\V1\Produtos\ProdutosController.cs =====
+using Mapster;
+using Microsoft.AspNetCore.Mvc;
+using MinhaApi.Application.Common;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
+using MinhaApi.Application.Produtos.DataTransfer.Responses;
+using MinhaApi.Application.Produtos.Services.Interfaces;
+using MinhaApi.Domain.Produtos.Commands;
+
+namespace MinhaApi.Api.Controllers.V1.Produtos;
+
+[ApiController]
+[Route("api/v1/[controller]")]
+[Produces("application/json")]
+public class ProdutosController(IProdutoService produtoService) : ControllerBase
+{
+    /// <summary>
+    /// Lista produtos com filtros opcionais e paginação.
+    /// </summary>
+    /// <param name="request"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    [HttpGet]
+    [ProducesResponseType<PagedResult<ProdutoResponse>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListarAsync([FromQuery] ListarProdutosRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(await produtoService.ListarAsync(request, cancellationToken));
+    }
+
+    /// <summary>
+    /// Recupera um produto pelo seu ID.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    [HttpGet("{id:int}")]
+    [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RecuperarAsync(int id, CancellationToken cancellationToken)
+    {
+        return Ok(await produtoService.RecuperarAsync(id, cancellationToken));
+    }
+
+    /// <summary>
+    /// Cria um novo produto.
+    /// </summary>
+    /// <param name="request"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    [HttpPost]
+    [ProducesResponseType<ProdutoResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> InserirAsync(CriarProdutoRequest request, CancellationToken cancellationToken)
+    {
+        var command = request.Adapt<CriarProdutoCommand>();
+        var produto = await produtoService.CriarAsync(command, cancellationToken);
+        return CreatedAtAction(nameof(InserirAsync), new { id = produto.Id }, produto);
+    }
+
+    /// <summary>
+    /// Atualiza um produto existente.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="request"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    [HttpPut("{id:int}")]
+    [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> EditarAsync(int id, AtualizarProdutoRequest request, CancellationToken ct)
+    {
+        var command = new AtualizarProdutoCommand(id, request.Nome, request.Preco);
+        return Ok(await produtoService.EditarAsync(command, ct));
+    }
+
+    /// <summary>
+    /// Exclui um produto existente.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ExcluirAsync(int id, CancellationToken cancellationToken)
+    {
+        await produtoService.ExcluirAsync(id, cancellationToken);
+        return NoContent();
+    }
+}
+
+===== src\MinhaApi.Api\Options\MySqlOptions.cs =====
+using System.ComponentModel.DataAnnotations;
+
+namespace MinhaApi.Api.Options;
+
+public class MySqlOptions
+{
+    [Range(1, 300)]
+    public int CommandTimeout { get; init; } = 30;
+}
+
+
+===== src\MinhaApi.Api\Program.cs =====
+using MinhaApi.Api.Configuration;
+using MinhaApi.Api.Options;
+using MinhaApi.CrossCutting.Logging;
+using MinhaApi.CrossCutting.Middlewares;
+using MinhaApi.IoC;
+using Serilog;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Serilog
+builder.Host.UseSerilog(SerilogConfiguration.Configurar);
+
+// 2. AddIoC()
+builder.Services.AddIoC(builder.Configuration);
+
+// Captive Dependency (README §7.6): valida em desenvolvimento que nenhum Singleton
+// esta capturando algo Scoped (como ISession) - isso quebraria em producao de um
+// jeito sutil, sem erro de compilacao.
+builder.Host.UseDefaultServiceProvider((ctx, opts) =>
+{
+    opts.ValidateScopes = ctx.HostingEnvironment.IsDevelopment();
+    opts.ValidateOnBuild = ctx.HostingEnvironment.IsDevelopment();
+});
+
+// 3. Options Pattern + ValidateOnStart()
+builder.Services
+    .AddOptions<MySqlOptions>()
+    .Bind(builder.Configuration.GetSection("MySql"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// 4. Controllers
+// (validacao de FluentValidation e feita explicitamente na Application - ver
+// ProdutoService - em vez de um filtro automatico de MVC)
+builder.Services.AddControllers();
+
+// 5. Swagger (registro)
+builder.Services.AddSwaggerConfigurado();
+
+// 6. CORS (origens explicitas - nunca AllowAnyOrigin em producao)
+builder.Services.AddCorsConfigurada(builder.Configuration);
+
+// 7. Rate Limiting
+builder.Services.AddRateLimitConfigurado();
+
+// 8. Health Checks
+var connectionString = builder.Configuration.GetConnectionString("MySql");
+builder.Services.AddHealthChecks()
+    .AddMySql(connectionString ?? string.Empty, name: "mysql");
+
+// 9. Limites do Kestrel
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.Limits.MaxRequestBodySize = 10 * 1024 * 1024; // 10 MB
+});
+
+// 10. Authentication / Authorization -> FASE 17 (JWT)
+
+var app = builder.Build();
+
+// 11. CorrelationIdMiddleware
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+// 12. ExceptionMiddleware
+app.UseMiddleware<ExceptionMiddleware>();
+
+// 13. SecurityHeadersMiddleware
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// 14. UseHttpsRedirection + UseHsts (producao)
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+app.UseHttpsRedirection();
+
+// 15. UseCors
+app.UseCors(CorsConfiguration.PoliticaPadrao);
+
+// 16. UseRateLimiter
+app.UseRateLimiter();
+
+// 17. UseAuthentication + UseAuthorization -> FASE 17 (JWT)
+
+// 18. MapControllers + MapHealthChecks
+app.MapControllers();
+app.MapHealthChecks("/health");
+
+// 19. Swagger UI -> SOMENTE se IsDevelopment()
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+// 20. Graceful Shutdown
+app.Lifetime.ApplicationStopping.Register(() =>
+    Log.Information("Aplicacao esta parando - drenando requisicoes em andamento..."));
+
+app.Run();
+
+
+===== src\MinhaApi.Application\Common\PagedResult.cs =====
+namespace MinhaApi.Application.Common;
+
+public record PagedResult<T>(
+    IReadOnlyList<T> Itens,
+    int Pagina,
+    int TamanhoPagina,
+    long TotalItens)
+{
+    public int TotalPaginas => (int)Math.Ceiling(TotalItens / (double)TamanhoPagina);
+}
+
+
+===== src\MinhaApi.Application\Common\Result.cs =====
+namespace MinhaApi.Application.Common;
+
+// Use com parcimonia (README §5.1, PLANO §8.2): so para fluxos de negocio com
+// MULTIPLOS caminhos que exigem decisao do chamador (retry, fallback, compensacao).
+// Exemplo real de uso: ProdutoService.AtualizarPrecoComRetryAsync - tenta a
+// atualizacao, e se bater em conflito de concorrencia otimista, decide sozinho se
+// tenta de novo ou desiste, devolvendo um resultado definitivo pro chamador (nem
+// exception, nem sucesso "fingido") em vez de propagar erro tecnico pra fora.
+public class Result<T>
+{
+    public bool Sucesso { get; }
+    public T? Valor { get; }
+    public string? Erro { get; }
+
+    internal Result(bool sucesso, T? valor, string? erro)
+    {
+        Sucesso = sucesso;
+        Valor = valor;
+        Erro = erro;
+    }
+}
+
+// Classe nao-generica separada de proposito (corrige CA1000): permite Result.Ok(valor)
+// com o tipo inferido pelo argumento, em vez de forcar Result<ProdutoResponse>.Ok(valor).
+// Excecao: Falha<T>(string) nao tem argumento do tipo T pra inferir - nesse caso
+// e preciso escrever o tipo explicitamente: Result.Falha<ProdutoResponse>("erro").
+public static class Result
+{
+    public static Result<T> Ok<T>(T valor) => new(true, valor, null);
+    public static Result<T> Falha<T>(string erro) => new(false, default, erro);
+}
+
+
+===== src\MinhaApi.Application\Produtos\DataTransfer\Requests\ListarProdutosRequest.cs =====
+using MinhaApi.Domain.Abstractions;
+
+namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
+
+// Substitui o antigo PaginacaoRequest (so pagina/tamanho) e o ProdutoFilter (so
+// filtros) - agora e um objeto so por entidade, com ordenacao padrao fixada no
+// construtor (o front so troca TpOrd ao clicar numa coluna, nao manda qualquer
+// nome de campo livre).
+public class ListarProdutosRequest : PaginacaoFiltro
+{
+    public string? Nome { get; set; }
+    public decimal? PrecoMinimo { get; set; }
+    public decimal? PrecoMaximo { get; set; }
+    public bool? Ativo { get; set; }
+
+    public ListarProdutosRequest() : base(cpOrd: "Id", tpOrd: TipoOrdenacao.Ascendente)
+    {
+    }
+}
+
+===== src\MinhaApi.Application\Produtos\DataTransfer\Requests\ProdutoRequest.cs =====
+namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
+
+public class ProdutoRequest
+{
+    public string Nome {get; set;}
+};
+
+
+===== src\MinhaApi.Application\Produtos\DataTransfer\Responses\ProdutoResponse.cs =====
+namespace MinhaApi.Application.Produtos.DataTransfer.Responses;
+
+public record ProdutoResponse(
+    long Id,
+    string Nome,
+    decimal Preco,
+    bool Ativo,
+    DateTime CriadoEm,
+    DateTime? AtualizadoEm);
+
+
+===== src\MinhaApi.Application\Produtos\Profiles\ProdutoProfile.cs =====
+using Mapster;
+using MinhaApi.Application.Produtos.DataTransfer.Responses;
+using MinhaApi.Domain.Produtos.Entities;
+
+namespace MinhaApi.Application.Produtos.Profiles;
+
+// Registrada via TypeAdapterConfig.GlobalSettings.Scan(assembly) na FASE 10 (IoC).
+public class ProdutoMappingConfig : IRegister
+{
+    public void Register(TypeAdapterConfig config)
+    {
+        // Produto -> ProdutoResponse ja e coberto por convencao (mesmos nomes de
+        // propriedade). Request -> Command tambem e coberto por convencao quando os
+        // campos batem (CriarProdutoRequest -> CriarProdutoCommand). Esta classe fica
+        // aqui pronta pra quando algum desses mapeamentos precisar de regra customizada.
+        config.NewConfig<Produto, ProdutoResponse>();
+    }
+}
+
+
+===== src\MinhaApi.Application\Produtos\Services\Interfaces\IProdutoService.cs =====
+using MinhaApi.Application.Common;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
+using MinhaApi.Application.Produtos.DataTransfer.Responses;
+using MinhaApi.Domain.Produtos.Commands;
+
+namespace MinhaApi.Application.Produtos.Services.Interfaces;
+
+public interface IProdutoService
+{
+    Task<ProdutoResponse> RecuperarAsync(int id, CancellationToken cancellationToken);
+    Task<PagedResult<ProdutoResponse>> ListarAsync(ListarProdutosRequest request, CancellationToken cancellationToken);
+    Task<ProdutoResponse> CriarAsync(CriarProdutoCommand command, CancellationToken cancellationToken);
+    Task<ProdutoResponse> EditarAsync(AtualizarProdutoCommand command, CancellationToken cancellationToken);
+    Task ExcluirAsync(int id, CancellationToken cancellationToken);
+}
+
+===== src\MinhaApi.Application\Produtos\Services\ProdutoService.cs =====
+using FluentValidation;
+using Mapster;
+using MinhaApi.Application.Common;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
+using MinhaApi.Application.Produtos.DataTransfer.Responses;
+using MinhaApi.Application.Produtos.Services.Interfaces;
+using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Domain.Produtos.Entities;
+using MinhaApi.Domain.Produtos.Repositories;
+
+namespace MinhaApi.Application.Produtos.Services;
+
+public class ProdutoService(
+    IProdutoRepository repository,
+    IValidator<CriarProdutoCommand> criarValidator,
+    IValidator<AtualizarProdutoCommand> atualizarValidator) : IProdutoService
+{
+    public async Task<ProdutoResponse> ObterPorIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var produto = await repository.RecuperarAsync(id, cancellationToken)
+            ?? throw new NaoEncontradoException<Produto>(id);
+
+        // TODO (FASE 17 - IDOR, README §6.3): quando a autenticacao existir, validar
+        // aqui se o usuario logado (UsuarioLogadoId/TenantId) tem posse deste recurso
+        // antes de retornar - lancar AcessoNegadoException caso contrario.
+
+        return produto.Adapt<ProdutoResponse>();
+    }
+
+    public async Task<PagedResult<ProdutoResponse>> ObterTodosAsync(ListarProdutosRequest request, CancellationToken cancellationToken = default)
+    {
+        // Um unico predicado combinado, com cada condicao opcional "neutralizada"
+        // quando o filtro correspondente nao foi informado - nao precisa de
+        // biblioteca de combinacao de Expression, o NHibernate resolve isso como
+        // um WHERE so com os AND/OR corretos.
+        var resultado = await repository.ListarAsync(
+            request,
+            p =>
+                (string.IsNullOrWhiteSpace(request.Nome) || p.Nome.Contains(request.Nome)) &&
+                (!request.PrecoMinimo.HasValue || p.Preco >= request.PrecoMinimo.GetValueOrDefault()) &&
+                (!request.PrecoMaximo.HasValue || p.Preco <= request.PrecoMaximo.GetValueOrDefault()) &&
+                (!request.Ativo.HasValue || p.Ativo == request.Ativo.GetValueOrDefault()),
+            cancellationToken);
+
+        var itens = resultado.Itens.Adapt<List<ProdutoResponse>>();
+
+        return new PagedResult<ProdutoResponse>(itens, resultado.Pagina, resultado.TamanhoPagina, resultado.TotalItens);
+    }
+
+    public async Task<ProdutoResponse> CriarAsync(CriarProdutoCommand command, CancellationToken cancellationToken = default)
+    {
+        var validacao = await criarValidator.ValidateAsync(command, cancellationToken);
+        if (!validacao.IsValid)
+        {
+            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+        }
+
+        var produto = new Produto(command.Nome, command.Preco);
+
+        await repository.InserirAsync(produto, cancellationToken);
+
+        return produto.Adapt<ProdutoResponse>();
+    }
+
+    public async Task<ProdutoResponse> AtualizarAsync(AtualizarProdutoCommand command, CancellationToken cancellationToken = default)
+    {
+        var validacao = await atualizarValidator.ValidateAsync(command, cancellationToken);
+        if (!validacao.IsValid)
+        {
+            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+        }
+
+        var produto = await repository.RecuperarAsync(command.Id, cancellationToken)
+            ?? throw new NaoEncontradoException<Produto>(command.Id);
+
+        produto.AtualizarNome(command.Nome);
+        produto.AtualizarPreco(command.Preco);
+
+        await repository.EditarAsync(produto, cancellationToken);
+
+        return produto.Adapt<ProdutoResponse>();
+    }
+
+    public async Task ExcluirAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var produto = await repository.RecuperarAsync(id, cancellationToken)
+            ?? throw new NaoEncontradoException<Produto>(id);
+
+        produto.Desativar();
+        await repository.EditarAsync(produto, cancellationToken);
+    }
+
+    public async Task<Result<ProdutoResponse>> AtualizarPrecoComRetryAsync(
+        int id, decimal novoPreco, int maxTentativas = 3, CancellationToken cancellationToken = default)
+    {
+        for (var tentativa = 1; tentativa <= maxTentativas; tentativa++)
+        {
+            try
+            {
+                var produto = await repository.RecuperarAsync(id, cancellationToken)
+                    ?? throw new NaoEncontradoException<Produto>(id);
+
+                produto.AtualizarPreco(novoPreco);
+                await repository.EditarAsync(produto, cancellationToken);
+
+                return Result.Ok(produto.Adapt<ProdutoResponse>());
+            }
+            catch (ConflitoException)
+            {
+                if (tentativa == maxTentativas)
+                {
+                    return Result.Falha<ProdutoResponse>(
+                        $"Não foi possível atualizar o preço após {maxTentativas} tentativas devido a conflitos concorrentes simultâneos.");
+                }
+            }
+        }
+
+        return Result.Falha<ProdutoResponse>("Erro inesperado ao atualizar o preço.");
+    }
+}
+
+===== src\MinhaApi.Application\Produtos\Validators\AtualizarProdutoCommandValidator.cs =====
+using FluentValidation;
+using MinhaApi.Domain.Produtos.Commands;
+
+namespace MinhaApi.Application.Produtos.Validators;
+
+public class AtualizarProdutoCommandValidator : AbstractValidator<AtualizarProdutoCommand>
+{
+    public AtualizarProdutoCommandValidator()
+    {
+        RuleFor(x => x.Nome)
+            .NotEmpty().WithMessage("Nome é obrigatório.")
+            .MaximumLength(100).WithMessage("Nome deve ter no máximo 100 caracteres.");
+
+        RuleFor(x => x.Preco)
+            .GreaterThanOrEqualTo(0).WithMessage("Preço não pode ser negativo.");
+    }
+}
+
+
+===== src\MinhaApi.Application\Produtos\Validators\CriarProdutoCommandValidator.cs =====
+using FluentValidation;
+using MinhaApi.Domain.Produtos.Commands;
+
+namespace MinhaApi.Application.Produtos.Validators;
+
+public class CriarProdutoCommandValidator : AbstractValidator<CriarProdutoCommand>
+{
+    public CriarProdutoCommandValidator()
+    {
+        RuleFor(x => x.Nome)
+            .NotEmpty().WithMessage("Nome é obrigatório.")
+            .MaximumLength(100).WithMessage("Nome deve ter no máximo 100 caracteres.");
+
+        RuleFor(x => x.Preco)
+            .GreaterThanOrEqualTo(0).WithMessage("Preço não pode ser negativo.");
+    }
+}
+
+
+===== src\MinhaApi.CrossCutting\Exceptions\AcessoNegadoException.cs =====
+using Microsoft.AspNetCore.Http;
+
+namespace MinhaApi.CrossCutting.Exceptions;
+
+// Peca usada na defesa contra IDOR (README §6.3): quando a Application valida posse
+// do recurso (UsuarioLogadoId/TenantId) e o usuario autenticado nao tem acesso aquele
+// recurso especifico, lanca esta exception em vez de um generico NaoEncontradoException
+// (nao "vaza" pro cliente se o recurso existe ou nao, so nega o acesso).
+public class AcessoNegadoException(string mensagem = "Acesso negado ao recurso.")
+    : AppException(mensagem)
+{
+    public override int StatusCode => StatusCodes.Status403Forbidden;
+}
+
+
+===== src\MinhaApi.CrossCutting\Exceptions\AppException.cs =====
+namespace MinhaApi.CrossCutting.Exceptions;
+
+public abstract class AppException(string mensagem) : Exception(mensagem)
+{
+    public abstract int StatusCode { get; }
+}
+
+
+===== src\MinhaApi.CrossCutting\Exceptions\ConflitoException.cs =====
+using Microsoft.AspNetCore.Http;
+
+namespace MinhaApi.CrossCutting.Exceptions;
+
+public class ConflitoException(string mensagem) : AppException(mensagem)
+{
+    public override int StatusCode => StatusCodes.Status409Conflict;
+}
+
+
+===== src\MinhaApi.CrossCutting\Exceptions\EntidadeInvalidaException.cs =====
+using Microsoft.AspNetCore.Http;
+
+namespace MinhaApi.CrossCutting.Exceptions;
+
+public class EntidadeInvalidaException(IEnumerable<string> erros)
+    : AppException("Um ou mais erros de validação ocorreram.")
+{
+    public override int StatusCode => StatusCodes.Status400BadRequest;
+    public IEnumerable<string> Erros { get; } = erros;
+}
+
+
+===== src\MinhaApi.CrossCutting\Exceptions\NaoEncontradoException.cs =====
+using Microsoft.AspNetCore.Http;
+
+namespace MinhaApi.CrossCutting.Exceptions;
+
+public class NaoEncontradoException<T>(object id)
+    : AppException($"{typeof(T).Name} com id '{id}' não foi encontrado.")
+{
+    public override int StatusCode => StatusCodes.Status404NotFound;
+}
+
+
+===== src\MinhaApi.CrossCutting\Logging\SerilogConfiguration.cs =====
+using System.Globalization;
+using Microsoft.Extensions.Hosting;
+using Serilog;
+using Serilog.Formatting.Json;
+
+namespace MinhaApi.CrossCutting.Logging;
+
+public static class SerilogConfiguration
+{
+    // Chamado no Program.cs como: builder.Host.UseSerilog(SerilogConfiguration.Configurar);
+    public static void Configurar(HostBuilderContext context, LoggerConfiguration loggerConfig)
+    {
+        loggerConfig
+            .ReadFrom.Configuration(context.Configuration)
+            .Enrich.FromLogContext()
+            .Enrich.WithCorrelationId();
+
+        if (context.HostingEnvironment.IsDevelopment())
+        {
+            loggerConfig
+                .MinimumLevel.Debug()
+                .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            loggerConfig
+                .MinimumLevel.Information()
+                .WriteTo.Console(new JsonFormatter())
+                .WriteTo.File(new JsonFormatter(), "logs/minha-api-.json", rollingInterval: RollingInterval.Day);
+        }
+
+        // TODO (LGPD - README §6.4): quando entidades com dados pessoais existirem
+        // (CPF, email, telefone), adicionar uma politica de destructuring/masking
+        // aqui antes de logar objetos completos. Ate la, nunca fazer log de entidade
+        // crua - sempre projetar pra DTO antes de logar.
+    }
+}
+
+===== src\MinhaApi.CrossCutting\Middlewares\CorrelationIdMiddleware.cs =====
+using Microsoft.AspNetCore.Http;
+using Serilog.Context;
+
+namespace MinhaApi.CrossCutting.Middlewares;
+
+public class CorrelationIdMiddleware(RequestDelegate next)
+{
+    private const string HeaderName = "X-Correlation-Id";
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var correlationId = context.Request.Headers.TryGetValue(HeaderName, out var existing)
+            && !string.IsNullOrWhiteSpace(existing)
+                ? existing.ToString()
+                : Guid.NewGuid().ToString();
+
+        context.Response.Headers[HeaderName] = correlationId;
+
+        using (LogContext.PushProperty("CorrelationId", correlationId))
+        {
+            await next(context);
+        }
+    }
+}
+
+
+===== src\MinhaApi.CrossCutting\Middlewares\ExceptionMiddleware.cs =====
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using MinhaApi.CrossCutting.Exceptions;
+
+namespace MinhaApi.CrossCutting.Middlewares;
+
+public partial class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionMiddleware> logger, IHostEnvironment environment)
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await next(context);
+        }
+        catch (Exception ex)
+        {
+            await HandleExceptionAsync(context, ex);
+        }
+    }
+
+    private async Task HandleExceptionAsync(HttpContext context, Exception exception)
+    {
+        // StaleObjectStateException do NHibernate (concorrencia otimista) agora e
+        // traduzida em ConflitoException direto no RepositorioBase (Infra) - o
+        // CrossCutting nao precisa mais conhecer o NHibernate pra tratar isso.
+        var statusCode = exception switch
+        {
+            AppException appException => appException.StatusCode,
+            _ => StatusCodes.Status500InternalServerError
+        };
+
+        // AppException = erro de negocio esperado (warning, nao polui alerta).
+        // Qualquer outra coisa = erro tecnico inesperado (error, aciona alerta real).
+        if (exception is AppException)
+        {
+            LogErroDeNegocio(logger, exception.Message, exception);
+        }
+        else
+        {
+            LogErroNaoTratado(logger, exception);
+        }
+
+        var problemDetails = new ProblemDetails
+        {
+            Status = statusCode,
+            Title = exception.Message,
+        };
+        problemDetails.Extensions["traceId"] = context.TraceIdentifier;
+
+        if (exception is EntidadeInvalidaException entidadeInvalida)
+        {
+            problemDetails.Extensions["errors"] = entidadeInvalida.Erros;
+        }
+
+        // Em producao, nunca expor stack trace, nome de tabela ou detalhe interno (README §6.3).
+        // AppException.Message ja e uma mensagem pensada pra ser publica, entao fica de fora dessa checagem.
+        if (environment.IsDevelopment() && exception is not AppException)
+        {
+            problemDetails.Detail = exception.ToString();
+        }
+
+        context.Response.ContentType = "application/problem+json";
+        context.Response.StatusCode = statusCode;
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(problemDetails, JsonOptions));
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Erro de negocio tratado: {Message}")]
+    private static partial void LogErroDeNegocio(ILogger logger, string message, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Erro nao tratado")]
+    private static partial void LogErroNaoTratado(ILogger logger, Exception exception);
+}
+
+
+===== src\MinhaApi.CrossCutting\Middlewares\SecurityHeadersMiddleware.cs =====
+using Microsoft.AspNetCore.Http;
+
+namespace MinhaApi.CrossCutting.Middlewares;
+
+public class SecurityHeadersMiddleware(RequestDelegate next)
+{
+    public async Task InvokeAsync(HttpContext context)
+    {
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+        context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'";
+
+        await next(context);
+    }
+}
+
+
+===== src\MinhaApi.Domain\Abstractions\IRepositorioBase.cs =====
+using System.Linq.Expressions;
+
+namespace MinhaApi.Domain.Abstractions;
+
+public interface IRepositorioBase<TEntidade> where TEntidade : class
+{
+    Task InserirAsync(TEntidade entidade, CancellationToken cancellationToken = default);
+    Task InserirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default);
+    Task EditarAsync(TEntidade entidade, CancellationToken cancellationToken = default);
+    Task ExcluirAsync(TEntidade entidade, CancellationToken cancellationToken = default);
+    Task ExcluirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default);
+    Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default);
+    Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default);
+
+    Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        PaginacaoFiltro paginacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default);
+
+    Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        int qt,
+        int pg,
+        (string Campo, TipoOrdenacao Tipo)[] ordenacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default);
+}
+
+===== src\MinhaApi.Domain\Abstractions\PaginacaoConsulta.cs =====
+namespace MinhaApi.Domain.Abstractions;
+
+// Resultado paginado no nivel de Domain/Infra - distinto do PagedResult<T> que
+// existe na Application (esse aqui carrega entidades de dominio, o outro carrega
+// DTOs de resposta). Domain/Infra nao podem depender de Application (regra de
+// dependencia, README §2.1), entao precisa do proprio tipo aqui.
+public class PaginacaoConsulta<TEntidade>(IReadOnlyList<TEntidade> itens, int totalItens, int pagina, int tamanhoPagina)
+{
+    public IReadOnlyList<TEntidade> Itens { get; } = itens;
+    public int TotalItens { get; } = totalItens;
+    public int Pagina { get; } = pagina;
+    public int TamanhoPagina { get; } = tamanhoPagina;
+}
+
+
+===== src\MinhaApi.Domain\Abstractions\PaginacaoFiltro.cs =====
+namespace MinhaApi.Domain.Abstractions;
+
+// Consolida quantidade/pagina/ordenacao num objeto so, usado pelo ListarAsync do
+// IRepositorioBase<T>. Nao tem metodo de montar SQL/ORDER BY como texto de proposito
+// - isso seria concatenar string em SQL (README §6.1, SQL Injection). A ordenacao de
+// verdade e resolvida com System.Linq.Dynamic.Core dentro do RepositorioBase, que
+// valida o nome da propriedade contra a entidade antes de montar a query.
+public class PaginacaoFiltro
+{
+    private const int QuantidadeMaxima = 100;
+    private const int QuantidadePadrao = 10;
+
+    private int _qt = QuantidadePadrao;
+    private int _pg = 1;
+
+    public int Qt
+    {
+        get => _qt;
+        // Teto de 100 (protecao contra payload malicioso/DoS, README §6.2). Piso de 1
+        // adicionado - valor negativo ou zero quebraria o Skip/Take no repositorio.
+        set => _qt = value switch
+        {
+            < 1 => QuantidadePadrao,
+            > QuantidadeMaxima => QuantidadeMaxima,
+            _ => value
+        };
+    }
+
+    public int Pg
+    {
+        get => _pg;
+        set => _pg = value < 1 ? 1 : value;
+    }
+
+    public string CpOrd { get; set; }
+
+    public TipoOrdenacao TpOrd { get; set; }
+
+    public PaginacaoFiltro(string cpOrd, TipoOrdenacao tpOrd = TipoOrdenacao.Ascendente)
+    {
+        CpOrd = cpOrd;
+        TpOrd = tpOrd;
+    }
+}
+
+===== src\MinhaApi.Domain\Abstractions\TipoOrdenacaoEnum.cs =====
+namespace MinhaApi.Domain.Abstractions;
+
+public enum TipoOrdenacao
+{
+    Ascendente,
+    Descendente
+}
+
+===== src\MinhaApi.Domain\Common\EntidadeBase.cs =====
+namespace MinhaApi.Domain.Common;
+
+public abstract class EntidadeBase
+{
+    public virtual int Id { get; protected set; }
+    public virtual bool Ativo { get; protected set; } = true;
+    public virtual DateTime CriadoEm { get; protected set; } = DateTime.UtcNow;
+    public virtual DateTime? AtualizadoEm { get; protected set; }
+    public virtual int Version { get; protected set; }
+
+    public virtual void Desativar()
+    {
+        Ativo = false;
+        AtualizadoEm = DateTime.UtcNow;
+    }
+}
+
+
+===== src\MinhaApi.Domain\Produtos\Commands\EditarProdutoCommand.cs =====
+namespace MinhaApi.Domain.Produtos.Commands;
+
+// Carrega o Id junto (diferente do Request, que recebe o Id separado via rota) -
+// um Command representa a intencao COMPLETA de uma acao, entao fica autocontido.
+public class EditarProdutoCommand()
+{
+    public int Id {get; protected set;}
+    public string Nome {get; protected set;} = string.Empty;
+    public decimal Preco {get; protected set;}
+};
+
+===== src\MinhaApi.Domain\Produtos\Commands\InserirProdutoCommand.cs =====
+namespace MinhaApi.Domain.Produtos.Commands;
+
+public class InserirProdutoCommand()
+{
+    public string Nome {get; protected set;} = string.Empty;
+    public decimal Preco {get; protected set;}
+};
+
+
+===== src\MinhaApi.Domain\Produtos\Entities\Produto.cs =====
+using System.ComponentModel.DataAnnotations;
+using MinhaApi.Domain.Common;
+using System;
+
+namespace MinhaApi.Domain.Produtos.Entities;
+
+public class Produto : EntidadeBase
+{
+    public virtual string Nome { get; protected set; } = string.Empty;
+    public virtual decimal Preco { get; protected set; }
+
+    protected Produto (){}
+
+    public Produto(string nome, decimal preco)
+    {
+        SetNome(nome);
+        SetPreco(preco);
+    }
+
+    public virtual void SetNome(string nome)
+    {
+        if (string.IsNullOrWhiteSpace(nome))
+            throw new ArgumentException("Nome do produto é obrigatório.", nameof(nome));
+        if (nome.Length < 3 && nome.Length > 100)
+            throw new ArgumentException("Nome deve ter no mínimo 3 e máximo 100 caracteres.");
+
+        Nome = nome;
+    }
+
+    public virtual void SetPreco(decimal preco)
+    {
+        if (preco < 0)
+            throw new ArgumentException("Preço não pode ser negativo.", nameof(preco));
+
+        Preco = preco;
+    }
+}
+
+===== src\MinhaApi.Domain\Produtos\Repositories\IProdutoRepository.cs =====
+using MinhaApi.Domain.Abstractions;
+using MinhaApi.Domain.Produtos.Entities;
+
+namespace MinhaApi.Domain.Produtos.Repositories;
+
+// Vazia de proposito por enquanto: RecuperarAsync(predicado) e ListarAsync
+// (paginado/ordenado, com filtro opcional) do IRepositorioBase<T> ja cobrem os
+// casos de consulta que existiam aqui antes (ObterComFiltroAsync). Ganha metodos
+// proprios quando surgir uma consulta que genuinamente nao da pra expressar como
+// predicado simples.
+public interface IProdutoRepository : IRepositorioBase<Produto>
+{
+}
+
+
+===== src\MinhaApi.Domain\Produtos\Services\Interfaces\IProdutosService.cs =====
+using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Domain.Produtos.Entities;
+
+namespace MinhaApi.Domain.Produtos.Services.Interfaces
+{
+    public interface IProdutosService
+    {
+        Task RecuperarAsync(int id, CancellationToken cancellationToken);
+        Task<Produto> CriarAsync(InserirProdutoCommand command, CancellationToken cancellationToken);
+        Task<Produto> EditarAsync(EditarProdutoCommand command, CancellationToken cancellationToken);
+        Task ExcluirAsync(int id, CancellationToken cancellationToken);
+    }
+}
+
+===== src\MinhaApi.Domain\Produtos\Services\ProdutosService.cs =====
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Domain.Produtos.Entities;
+using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Domain.Produtos.Services.Interfaces;
+
+namespace MinhaApi.Domain.Produtos.Services
+{
+    public class ProdutosService(
+        IProdutoRepository produtoRepository) : IProdutosService
+    {
+        public Task<Produto> CriarAsync(InserirProdutoCommand command, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<Produto> EditarAsync(EditarProdutoCommand command, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task ExcluirAsync(int id, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<Produto> RecuperarAsync(int id, CancellationToken cancellationToken)
+        {
+            Produto produto = await produtoRepository.RecuperarAsync(id, cancellationToken);
+            return produto;
+        }
+    }
+}
+
+===== src\MinhaApi.Infra\Config\NHibernateConfiguration.cs =====
+using FluentNHibernate.Cfg;
+using FluentNHibernate.Cfg.Db;
+using MinhaApi.Infra.Produtos.Mappings;
+using NHibernate;
+using NHibernate.Dialect;
+
+namespace MinhaApi.Infra.Config;
+
+public static class NHibernateConfiguration
+{
+    // ISessionFactory e cara de construir - por isso e Singleton (README §7.3/9.4),
+    // registrada assim na FASE 10 (IoC). Este metodo so monta a configuracao.
+    public static ISessionFactory CriarSessionFactory(string connectionString)
+    {
+        return Fluently.Configure()
+            .Database(MySQLConfiguration.Standard
+                .ConnectionString(connectionString)
+                .Driver<NHibernate.Driver.MySqlConnector.MySqlConnectorDriver>()
+                .Dialect<MySQL8Dialect>())
+            // AddFromAssemblyOf<ProdutoMap> so serve de "ancora" pra achar o assembly -
+            // escaneia TODOS os ClassMap<> do assembly inteiro, nao so o de Produto.
+            .Mappings(m => m.FluentMappings.AddFromAssemblyOf<ProdutoMap>())
+            .ExposeConfiguration(cfg =>
+            {
+                cfg.SetProperty(NHibernate.Cfg.Environment.CommandTimeout, "30");
+            })
+            .BuildSessionFactory();
+    }
+}
+
+
+===== src\MinhaApi.Infra\Config\RepositorioBase.cs =====
+using System.Linq.Dynamic.Core;
+using System.Linq.Expressions;
+using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Abstractions;
+using NHibernate;
+using NHibernate.Linq;
+
+namespace MinhaApi.Infra.Config;
+
+public class RepositorioBase<TEntidade>(ISession session) : IRepositorioBase<TEntidade>
+    where TEntidade : class
+{
+    protected ISession Session { get; } = session;
+
+    public virtual async Task InserirAsync(TEntidade entidade, CancellationToken cancellationToken = default)
+        => await Session.SaveAsync(entidade, cancellationToken);
+
+    public virtual async Task InserirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default)
+    {
+        foreach (var entidade in entidades)
+        {
+            await Session.SaveAsync(entidade, cancellationToken);
+        }
+    }
+
+    public virtual async Task EditarAsync(TEntidade entidade, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await Session.UpdateAsync(entidade, cancellationToken);
+            await Session.FlushAsync(cancellationToken);
+        }
+        catch (StaleObjectStateException)
+        {
+            throw new ConflitoException("O recurso foi modificado por outra operação. Recarregue e tente novamente.");
+        }
+    }
+
+    public virtual async Task ExcluirAsync(TEntidade entidade, CancellationToken cancellationToken = default)
+        => await Session.DeleteAsync(entidade, cancellationToken);
+
+    public virtual async Task ExcluirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default)
+    {
+        foreach (var entidade in entidades)
+        {
+            await Session.DeleteAsync(entidade, cancellationToken);
+        }
+    }
+
+    public virtual async Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default)
+        => await Session.GetAsync<TEntidade>(id, cancellationToken);
+
+    public virtual async Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default)
+        => await Session.Query<TEntidade>().Where(expressao).FirstOrDefaultAsync(cancellationToken);
+
+    public virtual Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        PaginacaoFiltro paginacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default)
+        => ListarInternoAsync(
+            paginacao.Qt, paginacao.Pg, filtro,
+            query => string.IsNullOrWhiteSpace(paginacao.CpOrd)
+                ? query
+                : query.OrderBy(ClausulaOrdenacao(paginacao.CpOrd, paginacao.TpOrd)),
+            cancellationToken);
+
+    public virtual Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        int qt,
+        int pg,
+        (string Campo, TipoOrdenacao Tipo)[] ordenacao,
+        Expression<Func<TEntidade, bool>>? filtro = null,
+        CancellationToken cancellationToken = default)
+        => ListarInternoAsync(
+            qt, pg, filtro,
+            query => ordenacao.Length == 0 ? query : query.OrderBy(ClausulaOrdenacao(ordenacao)),
+            cancellationToken);
+
+    private async Task<PaginacaoConsulta<TEntidade>> ListarInternoAsync(
+        int qt,
+        int pg,
+        Expression<Func<TEntidade, bool>>? filtro,
+        Func<IQueryable<TEntidade>, IQueryable<TEntidade>> aplicarOrdenacao,
+        CancellationToken cancellationToken)
+    {
+        var query = Session.Query<TEntidade>();
+
+        if (filtro is not null)
+        {
+            query = query.Where(filtro);
+        }
+
+        var totalItens = await query.CountAsync(cancellationToken);
+
+        query = aplicarOrdenacao(query);
+
+        var itens = await query
+            .Skip((pg - 1) * qt)
+            .Take(qt)
+            .ToListAsync(cancellationToken);
+
+        return new PaginacaoConsulta<TEntidade>(itens, totalItens, pg, qt);
+    }
+
+    // Monta a clausula no formato exigido pelo System.Linq.Dynamic.Core (ex: "Preco
+    // descending"). Diferente de SQL cru: o Dynamic.Core valida "Preco" como uma
+    // propriedade real de TEntidade via reflection antes de montar a expressao -
+    // um nome invalido lanca ParseException, nunca executa nada no banco.
+    private static string ClausulaOrdenacao(string campo, TipoOrdenacao tipo)
+        => $"{campo} {(tipo == TipoOrdenacao.Descendente ? "descending" : "ascending")}";
+
+    private static string ClausulaOrdenacao((string Campo, TipoOrdenacao Tipo)[] ordenacao)
+        => string.Join(", ", ordenacao.Select(o => ClausulaOrdenacao(o.Campo, o.Tipo)));
+}
+
+===== src\MinhaApi.Infra\Produtos\Mappings\ProdutoMap.cs =====
+using FluentNHibernate.Mapping;
+using MinhaApi.Domain.Produtos.Entities;
+
+namespace MinhaApi.Infra.Produtos.Mappings;
+
+public class ProdutoMap : ClassMap<Produto>
+{
+    public ProdutoMap()
+    {
+        Table("produto");
+        Id(x => x.Id).Column("id").GeneratedBy.Identity();
+        Map(x => x.Nome).Column("nome").Length(100).Not.Nullable();
+        Map(x => x.Preco).Column("preco").Precision(18).Scale(2).Not.Nullable();
+        Map(x => x.Ativo).Column("ativo").Not.Nullable();
+        Map(x => x.CriadoEm).Column("criado_em").Not.Nullable();
+        Map(x => x.AtualizadoEm).Column("atualizado_em");
+        Version(x => x.Version).Column("version"); // concorrencia otimista (lost update), README §7.3
+    }
+}
+
+
+===== src\MinhaApi.Infra\Produtos\Repositories\ProdutoRepository.cs =====
+using MinhaApi.Domain.Produtos.Entities;
+using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Infra.Config;
+using NHibernate;
+
+namespace MinhaApi.Infra.Produtos.Repositories;
+
+public class ProdutoRepository(ISession session) : RepositorioBase<Produto>(session), IProdutoRepository
+{
+}
+
+
+===== src\MinhaApi.IoC\ApplicationDependencyInjection.cs =====
+using FluentValidation;
+using Mapster;
+using Microsoft.Extensions.DependencyInjection;
+using MinhaApi.Application.Produtos.Profiles;
+using MinhaApi.Application.Produtos.Services;
+using MinhaApi.Application.Produtos.Services.Interfaces;
+using MinhaApi.Application.Produtos.Validators;
+
+namespace MinhaApi.IoC;
+
+public static class ApplicationDependencyInjection
+{
+    public static IServiceCollection AddApplication(this IServiceCollection services)
+    {
+        services.AddScoped<IProdutoService, ProdutoService>();
+
+        services.AddValidatorsFromAssemblyContaining<CriarProdutoCommandValidator>();
+
+        TypeAdapterConfig.GlobalSettings.Scan(typeof(ProdutoMappingConfig).Assembly);
+
+        return services;
+    }
+}
+
+
+===== src\MinhaApi.IoC\CrossCuttingDependencyInjection.cs =====
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MinhaApi.IoC;
+
+public static class CrossCuttingDependencyInjection
+{
+    // Reservado para registros futuros do CrossCutting via DI (ex: rate limiting
+    // customizado, health checks especificos). Os middlewares (ExceptionMiddleware,
+    // CorrelationIdMiddleware, SecurityHeadersMiddleware) NAO precisam de registro
+    // aqui - o ASP.NET Core os ativa sozinho via UseMiddleware<T>() no Program.cs
+    // (FASE 11), resolvendo as dependencias do construtor pela DI automaticamente.
+    public static IServiceCollection AddCrossCutting(this IServiceCollection services, IConfiguration config)
+        => services;
+}
+
+
+===== src\MinhaApi.IoC\DependencyInjection.cs =====
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MinhaApi.IoC;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddIoC(this IServiceCollection services, IConfiguration config)
+        => services
+            .AddCrossCutting(config)
+            .AddInfra(config)
+            .AddApplication();
+}
+
+
+===== src\MinhaApi.IoC\InfraDependencyInjection.cs =====
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Infra.Config;
+using MinhaApi.Infra.Produtos.Repositories;
+using NHibernate;
+
+namespace MinhaApi.IoC;
+
+public static class InfraDependencyInjection
+{
+    public static IServiceCollection AddInfra(this IServiceCollection services, IConfiguration config)
+    {
+        var connectionString = config.GetConnectionString("MySql")
+            ?? throw new InvalidOperationException("ConnectionStrings:MySql nao configurado.");
+
+        services.AddSingleton(_ => NHibernateConfiguration.CriarSessionFactory(connectionString));
+
+        // ISession: Scoped, UMA por requisicao HTTP. NUNCA Singleton (README §7.1).
+        services.AddScoped(provider => provider.GetRequiredService<ISessionFactory>().OpenSession());
+
+        services.AddScoped<IProdutoRepository, ProdutoRepository>();
+
+        return services;
+    }
+}
+
+
+===== src\MinhaApi.Jobs\Class1.cs =====
+namespace MinhaApi.Jobs;
+
+public class Class1
+{
+
+}
+
+
+===== tests\MinhaApi.Tests.Integration\UnitTest1.cs =====
+namespace MinhaApi.Tests.Integration;
+
+public class UnitTest1
+{
+    [Fact]
+    public void Test1()
+    {
+
+    }
+}
+
+
+===== tests\MinhaApi.Tests.Unit\Produtos\Entities\ProdutoTests.cs =====
+using AwesomeAssertions;
+using MinhaApi.Domain.Produtos.Entities;
+using Xunit;
+
+namespace MinhaApi.Tests.Unit.Domain.Produtos;
+
+public class ProdutoTests
+{
+    [Fact]
+    public void ConstructorComDadosValidosDeveCriarProdutoCorretamente()
+    {
+        var produto = new Produto("Teclado Mecânico", 350.00m);
+
+        produto.Nome.Should().Be("Teclado Mecânico");
+        produto.Preco.Should().Be(350.00m);
+        produto.Ativo.Should().BeTrue();
+        produto.Version.Should().Be(0);
+        produto.AtualizadoEm.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConstructorComNomeVazioOuEmBrancoDeveLancarArgumentException(string nomeInvalido)
+    {
+        var acao = () => new Produto(nomeInvalido, 100m);
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "nome");
+    }
+
+    [Fact]
+    public void ConstructorComPrecoNegativoDeveLancarArgumentException()
+    {
+        var acao = () => new Produto("Produto Válido", -10m);
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "preco");
+    }
+
+    [Fact]
+    public void AtualizarNomeComNomeValidoDeveAtualizarNomeEDefinirAtualizadoEm()
+    {
+        var produto = new Produto("Nome Original", 100m);
+
+        produto.AtualizarNome("Nome Novo");
+
+        produto.Nome.Should().Be("Nome Novo");
+        produto.AtualizadoEm.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AtualizarNomeComNomeVazioDeveLancarArgumentException()
+    {
+        var produto = new Produto("Nome Original", 100m);
+
+        var acao = () => produto.AtualizarNome("");
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "novoNome");
+    }
+
+    [Fact]
+    public void AtualizarPrecoComPrecoValidoDeveAtualizarPrecoEDefinirAtualizadoEm()
+    {
+        var produto = new Produto("Produto", 100m);
+
+        produto.AtualizarPreco(200m);
+
+        produto.Preco.Should().Be(200m);
+        produto.AtualizadoEm.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AtualizarPrecoComPrecoNegativoDeveLancarArgumentException()
+    {
+        var produto = new Produto("Produto", 100m);
+
+        var acao = () => produto.AtualizarPreco(-1m);
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "novoPreco");
+    }
+
+    [Fact]
+    public void DesativarDeveMarcarComoInativoEDefinirAtualizadoEm()
+    {
+        var produto = new Produto("Produto", 100m);
+
+        produto.Desativar();
+
+        produto.Ativo.Should().BeFalse();
+        produto.AtualizadoEm.Should().NotBeNull();
+    }
+}
+
+===== tests\MinhaApi.Tests.Unit\Produtos\Services\ProdutoServiceTests.cs =====
+using AwesomeAssertions;
+using FluentValidation;
+using FluentValidation.Results;
+using MinhaApi.Application.Produtos.Services;
+using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Domain.Produtos.Entities;
+using MinhaApi.Domain.Produtos.Repositories;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using Xunit;
+
+namespace MinhaApi.Tests.Unit.Produtos.Services;
+
+public class ProdutoServiceTests
+{
+    private readonly IProdutoRepository _repository = Substitute.For<IProdutoRepository>();
+    private readonly IValidator<CriarProdutoCommand> _criarValidator = Substitute.For<IValidator<CriarProdutoCommand>>();
+    private readonly IValidator<AtualizarProdutoCommand> _atualizarValidator = Substitute.For<IValidator<AtualizarProdutoCommand>>();
+    private readonly ProdutoService _sut;
+
+    public ProdutoServiceTests()
+    {
+        _sut = new ProdutoService(_repository, _criarValidator, _atualizarValidator);
+
+        _criarValidator.ValidateAsync(Arg.Any<CriarProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValidationResult());
+        _atualizarValidator.ValidateAsync(Arg.Any<AtualizarProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValidationResult());
+    }
+
+    [Fact]
+    public async Task CriarAsyncComCommandValidoDeveInserirERetornarResponseCorreto()
+    {
+        var command = new CriarProdutoCommand("Teclado", 350m);
+
+        var resultado = await _sut.CriarAsync(command);
+
+        resultado.Nome.Should().Be("Teclado");
+        resultado.Preco.Should().Be(350m);
+        await _repository.Received(1).InserirAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CriarAsyncComCommandInvalidoDeveLancarEntidadeInvalidaExceptionSemInserir()
+    {
+        var command = new CriarProdutoCommand("", 350m);
+        var erros = new List<ValidationFailure> { new("Nome", "Nome é obrigatório.") };
+        _criarValidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+            .Returns(new ValidationResult(erros));
+
+        var acao = async () => await _sut.CriarAsync(command);
+
+        await acao.Should().ThrowAsync<EntidadeInvalidaException>();
+        await _repository.DidNotReceive().InserirAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ObterPorIdAsyncComIdExistenteDeveRetornarResponse()
+    {
+        var produto = new Produto("Mouse", 120m);
+        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+
+        var resultado = await _sut.ObterPorIdAsync(1);
+
+        resultado.Nome.Should().Be("Mouse");
+    }
+
+    [Fact]
+    public async Task ObterPorIdAsyncComIdInexistenteDeveLancarNaoEncontradoException()
+    {
+        _repository.RecuperarAsync(99, Arg.Any<CancellationToken>()).Returns((Produto?)null);
+
+        var acao = async () => await _sut.ObterPorIdAsync(99);
+
+        await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
+    }
+
+    [Fact]
+    public async Task AtualizarAsyncComProdutoExistenteDeveAtualizarNomeEPreco()
+    {
+        var produto = new Produto("Nome Antigo", 100m);
+        var command = new AtualizarProdutoCommand(1, "Nome Novo", 200m);
+        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+
+        var resultado = await _sut.AtualizarAsync(command);
+
+        resultado.Nome.Should().Be("Nome Novo");
+        resultado.Preco.Should().Be(200m);
+        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AtualizarAsyncComProdutoInexistenteDeveLancarNaoEncontradoException()
+    {
+        var command = new AtualizarProdutoCommand(99, "Nome", 100m);
+        _repository.RecuperarAsync(99, Arg.Any<CancellationToken>()).Returns((Produto?)null);
+
+        var acao = async () => await _sut.AtualizarAsync(command);
+
+        await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
+    }
+
+    [Fact]
+    public async Task ExcluirAsyncComProdutoExistenteDeveDesativarEChamarEditarAsync()
+    {
+        var produto = new Produto("Produto", 100m);
+        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+
+        await _sut.ExcluirAsync(1);
+
+        produto.Ativo.Should().BeFalse();
+        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AtualizarPrecoComRetryAsyncSemConflitoDeveRetornarResultDeSucesso()
+    {
+        var produto = new Produto("Produto", 100m);
+        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+
+        var resultado = await _sut.AtualizarPrecoComRetryAsync(1, 150m);
+
+        resultado.Sucesso.Should().BeTrue();
+        resultado.Valor.Should().NotBeNull();
+        resultado.Valor!.Preco.Should().Be(150m);
+    }
+
+    [Fact]
+    public async Task AtualizarPrecoComRetryAsyncComConflitoPersistenteDeveRetornarFalhaAposEsgotarTentativas()
+    {
+        var produto = new Produto("Produto", 100m);
+        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+        _repository.EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>())
+            .Throws(new ConflitoException("Conflito simulado."));
+
+        var resultado = await _sut.AtualizarPrecoComRetryAsync(1, 150m, maxTentativas: 2);
+
+        resultado.Sucesso.Should().BeFalse();
+        resultado.Erro.Should().Contain("2 tentativas");
+        await _repository.Received(2).EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+    }
+}
+
+===== tests\MinhaApi.Tests.Unit\UnitTest1.cs =====
+namespace MinhaApi.Tests.Unit;
+
+public class UnitTest1
+{
+    [Fact]
+    public void Test1()
+    {
+
+    }
+}
+
+

@@ -1,57 +1,78 @@
-using Mapster;
 using Microsoft.AspNetCore.Mvc;
 using MinhaApi.Application.Common;
 using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
 using MinhaApi.Application.Produtos.Services.Interfaces;
-using MinhaApi.Domain.Produtos.Commands;
 
 namespace MinhaApi.Api.Controllers.V1.Produtos;
 
 [ApiController]
 [Route("api/v1/[controller]")]
 [Produces("application/json")]
-public class ProdutosController(IProdutoService service) : ControllerBase
+public class ProdutosController(IProdutoService produtoService) : ControllerBase
 {
-    // Ex: GET /api/v1/produtos?qt=20&pg=1&cpOrd=Nome&tpOrd=Descendente&nome=tec
+    /// <summary>
+    /// Lista produtos com filtros opcionais e paginação.
+    /// </summary>
+    /// <param name="request">Parâmetros de paginação, ordenação e filtro.</param>
+    /// <param name="cancellationToken"></param>
     [HttpGet]
     [ProducesResponseType<PagedResult<ProdutoResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ObterTodos([FromQuery] ListarProdutosRequest request, CancellationToken ct)
-        => Ok(await service.ObterTodosAsync(request, ct));
+    public async Task<IActionResult> ListarAsync([FromQuery] ListarProdutosRequest request, CancellationToken cancellationToken)
+        => Ok(await produtoService.ListarAsync(request, cancellationToken));
 
+    /// <summary>
+    /// Recupera um produto pelo seu ID.
+    /// </summary>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpGet("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> ObterPorId(int id, CancellationToken ct)
-        => Ok(await service.ObterPorIdAsync(id, ct));
+    public async Task<IActionResult> RecuperarAsync(int id, CancellationToken cancellationToken)
+        => Ok(await produtoService.RecuperarAsync(id, cancellationToken));
 
+    /// <summary>
+    /// Cria um novo produto.
+    /// </summary>
+    /// <param name="request">Dados do produto a ser criado.</param>
+    /// <param name="cancellationToken"></param>
     [HttpPost]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Criar(CriarProdutoRequest request, CancellationToken ct)
+    public async Task<IActionResult> InserirAsync(CriarProdutoRequest request, CancellationToken cancellationToken)
     {
-        var command = request.Adapt<CriarProdutoCommand>();
-        var produto = await service.CriarAsync(command, ct);
-        return CreatedAtAction(nameof(ObterPorId), new { id = produto.Id }, produto);
+        var produto = await produtoService.CriarAsync(request, cancellationToken);
+        return CreatedAtAction(nameof(RecuperarAsync), new { id = produto.Id }, produto);
     }
 
+    /// <summary>
+    /// Atualiza um produto existente.
+    /// </summary>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="request">Novos dados do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpPut("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Atualizar(int id, AtualizarProdutoRequest request, CancellationToken ct)
-    {
-        var command = new AtualizarProdutoCommand(id, request.Nome, request.Preco);
-        return Ok(await service.AtualizarAsync(command, ct));
-    }
+    public async Task<IActionResult> EditarAsync(int id, AtualizarProdutoRequest request, CancellationToken cancellationToken)
+        => Ok(await produtoService.EditarAsync(id, request, cancellationToken));
 
+    /// <summary>
+    /// Atualiza somente o preço de um produto, com nova tentativa automática em
+    /// caso de conflito de concorrência.
+    /// </summary>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="request">Novo preço.</param>
+    /// <param name="cancellationToken"></param>
     [HttpPatch("{id:int}/preco")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> AtualizarPreco(int id, AtualizarPrecoRequest request, CancellationToken ct)
+    public async Task<IActionResult> AtualizarPrecoAsync(int id, AtualizarPrecoRequest request, CancellationToken cancellationToken)
     {
-        var resultado = await service.AtualizarPrecoComRetryAsync(id, request.NovoPreco, cancellationToken: ct);
+        var resultado = await produtoService.AtualizarPrecoComRetryAsync(id, request.NovoPreco, cancellationToken: cancellationToken);
 
         if (!resultado.Sucesso)
         {
@@ -65,12 +86,17 @@ public class ProdutosController(IProdutoService service) : ControllerBase
         return Ok(resultado.Valor);
     }
 
+    /// <summary>
+    /// Exclui um produto existente.
+    /// </summary>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Excluir(int id, CancellationToken ct)
+    public async Task<IActionResult> ExcluirAsync(int id, CancellationToken cancellationToken)
     {
-        await service.ExcluirAsync(id, ct);
+        await produtoService.ExcluirAsync(id, cancellationToken);
         return NoContent();
     }
 }

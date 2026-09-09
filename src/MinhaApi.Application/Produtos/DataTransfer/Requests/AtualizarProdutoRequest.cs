@@ -1,3 +1,7 @@
 namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
 
-public record AtualizarProdutoRequest(string Nome, decimal Preco);
+public class AtualizarProdutoRequest
+{
+    public required string Nome { get; set; }
+    public decimal Preco { get; set; }
+}

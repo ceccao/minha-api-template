@@ -5,6 +5,8 @@ using MinhaApi.Application.Produtos.Profiles;
 using MinhaApi.Application.Produtos.Services;
 using MinhaApi.Application.Produtos.Services.Interfaces;
 using MinhaApi.Application.Produtos.Validators;
+using MinhaApi.Domain.Produtos.Services;
+using MinhaApi.Domain.Produtos.Services.Interfaces;
 
 namespace MinhaApi.IoC;
 
@@ -12,11 +14,17 @@ public static class ApplicationDependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        // Domain Service - a logica de negocio (Criar/Editar/Excluir) mora aqui.
+        // A Service da Application vira so um wrapper fino de transacao/validacao.
+        services.AddScoped<IProdutosService, ProdutosService>();
+
         services.AddScoped<IProdutoService, ProdutoService>();
 
-        services.AddValidatorsFromAssemblyContaining<CriarProdutoCommandValidator>();
+        // Validators agora sao dos Requests (Application), nao mais dos Commands
+        // (Domain) - evita o Domain precisar referenciar o FluentValidation.
+        services.AddValidatorsFromAssemblyContaining<CriarProdutoRequestValidator>();
 
-        TypeAdapterConfig.GlobalSettings.Scan(typeof(ProdutoMappingConfig).Assembly);
+        TypeAdapterConfig.GlobalSettings.Scan(typeof(ProdutoProfile).Assembly);
 
         return services;
     }
