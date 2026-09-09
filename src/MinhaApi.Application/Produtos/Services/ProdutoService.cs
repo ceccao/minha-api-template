@@ -38,9 +38,9 @@ public class ProdutoService(
             request,
             p =>
                 (string.IsNullOrWhiteSpace(request.Nome) || p.Nome.Contains(request.Nome)) &&
-                (!request.PrecoMinimo.HasValue || p.Preco >= request.PrecoMinimo.Value) &&
-                (!request.PrecoMaximo.HasValue || p.Preco <= request.PrecoMaximo.Value) &&
-                (!request.Ativo.HasValue || p.Ativo == request.Ativo.Value),
+                (!request.PrecoMinimo.HasValue || p.Preco >= request.PrecoMinimo.GetValueOrDefault()) &&
+                (!request.PrecoMaximo.HasValue || p.Preco <= request.PrecoMaximo.GetValueOrDefault()) &&
+                (!request.Ativo.HasValue || p.Ativo == request.Ativo.GetValueOrDefault()),
             cancellationToken);
 
         var itens = resultado.Itens.Adapt<List<ProdutoResponse>>();
