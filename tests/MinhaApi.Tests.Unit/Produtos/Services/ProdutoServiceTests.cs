@@ -1,12 +1,12 @@
 using AwesomeAssertions;
-using FluentValidation;
-using FluentValidation.Results;
 using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.Services;
 using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Domain.Produtos.Repositories.Filters;
 using MinhaApi.Domain.Produtos.Services.Interfaces;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -17,57 +17,20 @@ namespace MinhaApi.Tests.Unit.Produtos.Services;
 public class ProdutoServiceTests
 {
     private readonly IProdutosService _produtosService = Substitute.For<IProdutosService>();
-    private readonly IProdutoRepository _repository = Substitute.For<IProdutoRepository>();
-    private readonly IValidator<CriarProdutoRequest> _criarValidator = Substitute.For<IValidator<CriarProdutoRequest>>();
-    private readonly IValidator<AtualizarProdutoRequest> _atualizarValidator = Substitute.For<IValidator<AtualizarProdutoRequest>>();
+    private readonly IProdutoRepository _produtoRepository = Substitute.For<IProdutoRepository>();
+    private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly ProdutoService _sut;
 
     public ProdutoServiceTests()
     {
-        _sut = new ProdutoService(_produtosService, _repository, _criarValidator, _atualizarValidator);
-
-        _criarValidator.ValidateAsync(Arg.Any<CriarProdutoRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValidationResult());
-        _atualizarValidator.ValidateAsync(Arg.Any<AtualizarProdutoRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValidationResult());
+        _sut = new ProdutoService(_produtosService, _produtoRepository, _unitOfWork);
     }
 
     [Fact]
-    public async Task CriarAsyncComRequestValidoDeveChamarDomainServiceERetornarResponse()
-    {
-        var request = new CriarProdutoRequest { Nome = "Teclado", Preco = 350m };
-        var produtoCriado = new Produto("Teclado", 350m);
-        _produtosService.CriarAsync(Arg.Any<InserirProdutoCommand>(), Arg.Any<CancellationToken>())
-            .Returns(produtoCriado);
-
-        var resultado = await _sut.CriarAsync(request, CancellationToken.None);
-
-        resultado.Nome.Should().Be("Teclado");
-        resultado.Preco.Should().Be(350m);
-        await _produtosService.Received(1).CriarAsync(
-            Arg.Is<InserirProdutoCommand>(c => c.Nome == "Teclado" && c.Preco == 350m),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task CriarAsyncComRequestInvalidoDeveLancarEntidadeInvalidaExceptionSemChamarDomainService()
-    {
-        var request = new CriarProdutoRequest { Nome = "", Preco = 350m };
-        var erros = new List<ValidationFailure> { new("Nome", "Nome é obrigatório.") };
-        _criarValidator.ValidateAsync(request, Arg.Any<CancellationToken>())
-            .Returns(new ValidationResult(erros));
-
-        var acao = async () => await _sut.CriarAsync(request, CancellationToken.None);
-
-        await acao.Should().ThrowAsync<EntidadeInvalidaException>();
-        await _produtosService.DidNotReceive().CriarAsync(Arg.Any<InserirProdutoCommand>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task RecuperarAsyncComIdExistenteDeveRetornarResponse()
+    public async Task RecuperarAsyncDeveRetornarResponseQuandoValidarAsyncEncontraProduto()
     {
         var produto = new Produto("Mouse", 120m);
-        _produtosService.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+        _produtosService.ValidarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
 
         var resultado = await _sut.RecuperarAsync(1, CancellationToken.None);
 
@@ -75,9 +38,10 @@ public class ProdutoServiceTests
     }
 
     [Fact]
-    public async Task RecuperarAsyncComIdInexistenteDeveLancarNaoEncontradoException()
+    public async Task RecuperarAsyncDevePropagarNaoEncontradoExceptionDoValidarAsync()
     {
-        _produtosService.RecuperarAsync(99, Arg.Any<CancellationToken>()).Returns((Produto?)null);
+        _produtosService.ValidarAsync(99, Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
 
         var acao = async () => await _sut.RecuperarAsync(99, CancellationToken.None);
 
@@ -85,29 +49,75 @@ public class ProdutoServiceTests
     }
 
     [Fact]
-    public async Task EditarAsyncComProdutoExistenteDeveRetornarResponseAtualizado()
+    public async Task ListarAsyncDeveRetornarPaginacaoConsultaDeResponses()
     {
-        var request = new AtualizarProdutoRequest { Nome = "Nome Novo", Preco = 200m };
+        var request = new ListarProdutosRequest();
+        var produtos = new List<Produto> { new("Produto A", 10m), new("Produto B", 20m) };
+
+        _produtoRepository.Filtrar(Arg.Any<ProdutoListarFilter>()).Returns(produtos.AsQueryable());
+        _produtoRepository
+            .ListarAsync(Arg.Any<IQueryable<Produto>>(), request.Qt, request.Pg, request.CpOrd, request.TpOrd, Arg.Any<CancellationToken>())
+            .Returns(new PaginacaoConsulta<Produto>(produtos, produtos.Count, request.Pg, request.Qt));
+
+        var resultado = await _sut.ListarAsync(request, CancellationToken.None);
+
+        resultado.TotalItens.Should().Be(2);
+        resultado.Itens.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task InserirAsyncDeveChamarDomainServiceERetornarResponse()
+    {
+        var request = new ProdutoRequest { Nome = "Teclado", Preco = 350m };
+        var produtoCriado = new Produto("Teclado", 350m);
+        _produtosService.InserirAsync(Arg.Any<ProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Returns(produtoCriado);
+
+        var resultado = await _sut.InserirAsync(request, CancellationToken.None);
+
+        resultado.Nome.Should().Be("Teclado");
+        resultado.Preco.Should().Be(350m);
+        await _unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InserirAsyncQuandoDomainServiceLancaExceptionDeveFazerRollbackERepropagar()
+    {
+        // Sem FluentValidation injetado na Service, quem valida hoje e so a entidade
+        // (SetNome/SetPreco lancando ArgumentException) - vale registrar que isso
+        // significa 500 em vez de 400 pro cliente (ArgumentException nao e AppException),
+        // ate essa camada de validacao ser reintroduzida.
+        var request = new ProdutoRequest { Nome = "ab", Preco = 350m };
+        _produtosService.InserirAsync(Arg.Any<ProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Throws(new ArgumentException("Nome deve ter no mínimo 3 e máximo 100 caracteres."));
+
+        var acao = async () => await _sut.InserirAsync(request, CancellationToken.None);
+
+        await acao.Should().ThrowAsync<ArgumentException>();
+        await _unitOfWork.Received(1).RollbackAsync(Arg.Any<CancellationToken>());
+        await _unitOfWork.DidNotReceive().CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EditarAsyncDeveChamarDomainServiceERetornarResponseAtualizado()
+    {
+        var request = new ProdutoRequest { Nome = "Nome Novo", Preco = 200m };
         var produtoEditado = new Produto("Nome Novo", 200m);
-        _produtosService.EditarAsync(1, Arg.Any<EditarProdutoCommand>(), Arg.Any<CancellationToken>())
+        _produtosService.EditarAsync(1, Arg.Any<ProdutoCommand>(), Arg.Any<CancellationToken>())
             .Returns(produtoEditado);
 
         var resultado = await _sut.EditarAsync(1, request, CancellationToken.None);
 
         resultado.Nome.Should().Be("Nome Novo");
         resultado.Preco.Should().Be(200m);
-        await _produtosService.Received(1).EditarAsync(
-            1,
-            Arg.Is<EditarProdutoCommand>(c => c.Nome == "Nome Novo" && c.Preco == 200m),
-            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task EditarAsyncComProdutoInexistenteDeveLancarNaoEncontradoException()
+    public async Task EditarAsyncDevePropagarNaoEncontradoExceptionDoDomainService()
     {
-        var request = new AtualizarProdutoRequest { Nome = "Nome", Preco = 100m };
-        _produtosService.EditarAsync(99, Arg.Any<EditarProdutoCommand>(), Arg.Any<CancellationToken>())
-            .Returns((Produto?)null);
+        var request = new ProdutoRequest { Nome = "Nome", Preco = 100m };
+        _produtosService.EditarAsync(99, Arg.Any<ProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
 
         var acao = async () => await _sut.EditarAsync(99, request, CancellationToken.None);
 
@@ -115,50 +125,27 @@ public class ProdutoServiceTests
     }
 
     [Fact]
-    public async Task ExcluirAsyncComProdutoExistenteNaoDeveLancarExcecao()
+    public async Task ExcluirAsyncDeveChamarInativarAsyncNaoAtivarAsync()
     {
-        _produtosService.ExcluirAsync(1, Arg.Any<CancellationToken>()).Returns(true);
+        // Este teste existe especificamente pra travar o bug que encontramos:
+        // ExcluirAsync chamava AtivarAsync por engano (copy-paste).
+        var produto = new Produto("Produto", 100m);
+        _produtosService.InativarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
 
-        var acao = async () => await _sut.ExcluirAsync(1, CancellationToken.None);
+        await _sut.ExcluirAsync(1, CancellationToken.None);
 
-        await acao.Should().NotThrowAsync();
+        await _produtosService.Received(1).InativarAsync(1, Arg.Any<CancellationToken>());
+        await _produtosService.DidNotReceive().AtivarAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExcluirAsyncComProdutoInexistenteDeveLancarNaoEncontradoException()
+    public async Task ExcluirAsyncDevePropagarNaoEncontradoExceptionDoDomainService()
     {
-        _produtosService.ExcluirAsync(99, Arg.Any<CancellationToken>()).Returns(false);
+        _produtosService.InativarAsync(99, Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
 
         var acao = async () => await _sut.ExcluirAsync(99, CancellationToken.None);
 
         await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
-    }
-
-    [Fact]
-    public async Task AtualizarPrecoComRetryAsyncSemConflitoDeveRetornarResultDeSucesso()
-    {
-        var produto = new Produto("Produto", 100m);
-        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
-
-        var resultado = await _sut.AtualizarPrecoComRetryAsync(1, 150m);
-
-        resultado.Sucesso.Should().BeTrue();
-        resultado.Valor.Should().NotBeNull();
-        resultado.Valor!.Preco.Should().Be(150m);
-    }
-
-    [Fact]
-    public async Task AtualizarPrecoComRetryAsyncComConflitoPersistenteDeveRetornarFalhaAposEsgotarTentativas()
-    {
-        var produto = new Produto("Produto", 100m);
-        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
-        _repository.EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>())
-            .Throws(new ConflitoException("Conflito simulado."));
-
-        var resultado = await _sut.AtualizarPrecoComRetryAsync(1, 150m, maxTentativas: 2);
-
-        resultado.Sucesso.Should().BeFalse();
-        resultado.Erro.Should().Contain("2 tentativas");
-        await _repository.Received(2).EditarAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
     }
 }

@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using MinhaApi.CrossCutting.Enums;
 using MinhaApi.Domain.Produtos.Entities;
 using Xunit;
 
@@ -13,9 +14,7 @@ public class ProdutoTests
 
         produto.Nome.Should().Be("Teclado Mecânico");
         produto.Preco.Should().Be(350.00m);
-        produto.Ativo.Should().BeTrue();
-        produto.Version.Should().Be(0);
-        produto.AtualizadoEm.Should().BeNull();
+        produto.Situacao.Should().Be(Situacao.Ativo);
     }
 
     [Theory]
@@ -30,13 +29,10 @@ public class ProdutoTests
     }
 
     [Theory]
-    [InlineData("ab")]     // 2 caracteres - abaixo do minimo
-    [InlineData("Produto com nome bem longo que ultrapassa exatamente o limite de cem caracteres permitidos no campo nome")] // > 100
+    [InlineData("ab")]
+    [InlineData("Produto com nome bem longo que ultrapassa exatamente o limite de cem caracteres permitidos no campo nome")]
     public void ConstructorComNomeForaDoTamanhoPermitidoDeveLancarArgumentException(string nomeInvalido)
     {
-        // Cobre o bug corrigido: a checagem antiga usava "&&" em vez de "||" e
-        // nunca disparava pra nenhum tamanho de string - esse teste garante que
-        // ambas as pontas (muito curto e muito longo) realmente lancam a exception.
         var acao = () => new Produto(nomeInvalido, 100m);
 
         acao.Should().Throw<ArgumentException>()
@@ -53,14 +49,13 @@ public class ProdutoTests
     }
 
     [Fact]
-    public void SetNomeComNomeValidoDeveDefinirNomeEAtualizadoEm()
+    public void SetNomeComNomeValidoDeveDefinirNome()
     {
         var produto = new Produto("Nome Original", 100m);
 
         produto.SetNome("Nome Novo");
 
         produto.Nome.Should().Be("Nome Novo");
-        produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
@@ -75,14 +70,13 @@ public class ProdutoTests
     }
 
     [Fact]
-    public void SetPrecoComPrecoValidoDeveDefinirPrecoEAtualizadoEm()
+    public void SetPrecoComPrecoValidoDeveDefinirPreco()
     {
         var produto = new Produto("Produto", 100m);
 
         produto.SetPreco(200m);
 
         produto.Preco.Should().Be(200m);
-        produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
@@ -97,13 +91,23 @@ public class ProdutoTests
     }
 
     [Fact]
-    public void DesativarDeveMarcarComoInativoEDefinirAtualizadoEm()
+    public void InativarDeveMarcarSituacaoComoInativo()
     {
         var produto = new Produto("Produto", 100m);
 
-        produto.Desativar();
+        produto.Inativar();
 
-        produto.Ativo.Should().BeFalse();
-        produto.AtualizadoEm.Should().NotBeNull();
+        produto.Situacao.Should().Be(Situacao.Inativo);
+    }
+
+    [Fact]
+    public void AtivarDeveMarcarSituacaoComoAtivo()
+    {
+        var produto = new Produto("Produto", 100m);
+        produto.Inativar();
+
+        produto.Ativar();
+
+        produto.Situacao.Should().Be(Situacao.Ativo);
     }
 }

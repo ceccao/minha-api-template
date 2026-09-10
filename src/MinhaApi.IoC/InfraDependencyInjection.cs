@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Repositories;
 using MinhaApi.Infra.Config;
 using MinhaApi.Infra.Produtos.Repositories;
@@ -18,6 +19,11 @@ public static class InfraDependencyInjection
 
         // ISession: Scoped, UMA por requisicao HTTP. NUNCA Singleton (README §7.1).
         services.AddScoped(provider => provider.GetRequiredService<ISessionFactory>().OpenSession());
+
+        // UnitOfWork tambem Scoped - precisa usar a MESMA ISession da requisicao,
+        // senao a transacao seria aberta numa sessao diferente da que os
+        // repositorios estao usando.
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         services.AddScoped<IProdutoRepository, ProdutoRepository>();
 

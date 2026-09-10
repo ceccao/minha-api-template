@@ -40,9 +40,9 @@ public class ProdutosController(IProdutoService produtoService) : ControllerBase
     [HttpPost]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> InserirAsync(CriarProdutoRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> InserirAsync(ProdutoRequest request, CancellationToken cancellationToken)
     {
-        var produto = await produtoService.CriarAsync(request, cancellationToken);
+        var produto = await produtoService.InserirAsync(request, cancellationToken);
         return CreatedAtAction(nameof(RecuperarAsync), new { id = produto.Id }, produto);
     }
 
@@ -56,36 +56,9 @@ public class ProdutosController(IProdutoService produtoService) : ControllerBase
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> EditarAsync(int id, AtualizarProdutoRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> EditarAsync(int id, ProdutoRequest request, CancellationToken cancellationToken)
         => Ok(await produtoService.EditarAsync(id, request, cancellationToken));
-
-    /// <summary>
-    /// Atualiza somente o preço de um produto, com nova tentativa automática em
-    /// caso de conflito de concorrência.
-    /// </summary>
-    /// <param name="id">Identificador do produto.</param>
-    /// <param name="request">Novo preço.</param>
-    /// <param name="cancellationToken"></param>
-    [HttpPatch("{id:int}/preco")]
-    [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> AtualizarPrecoAsync(int id, AtualizarPrecoRequest request, CancellationToken cancellationToken)
-    {
-        var resultado = await produtoService.AtualizarPrecoComRetryAsync(id, request.NovoPreco, cancellationToken: cancellationToken);
-
-        if (!resultado.Sucesso)
-        {
-            return Conflict(new ProblemDetails
-            {
-                Status = StatusCodes.Status409Conflict,
-                Title = resultado.Erro
-            });
-        }
-
-        return Ok(resultado.Valor);
-    }
-
+    
     /// <summary>
     /// Exclui um produto existente.
     /// </summary>

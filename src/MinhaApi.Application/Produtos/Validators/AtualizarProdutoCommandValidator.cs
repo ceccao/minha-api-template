@@ -3,7 +3,7 @@ using MinhaApi.Application.Produtos.DataTransfer.Requests;
 
 namespace MinhaApi.Application.Produtos.Validators;
 
-public class AtualizarProdutoRequestValidator : AbstractValidator<AtualizarProdutoRequest>
+public class AtualizarProdutoRequestValidator : AbstractValidator<ProdutoRequest>
 {
     public AtualizarProdutoRequestValidator()
     {

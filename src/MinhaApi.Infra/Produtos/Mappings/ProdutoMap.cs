@@ -7,13 +7,12 @@ public class ProdutoMap : ClassMap<Produto>
 {
     public ProdutoMap()
     {
-        Table("produto");
-        Id(x => x.Id).Column("id").GeneratedBy.Identity();
-        Map(x => x.Nome).Column("nome").Length(100).Not.Nullable();
-        Map(x => x.Preco).Column("preco").Precision(18).Scale(2).Not.Nullable();
-        Map(x => x.Ativo).Column("ativo").Not.Nullable();
-        Map(x => x.CriadoEm).Column("criado_em").Not.Nullable();
-        Map(x => x.AtualizadoEm).Column("atualizado_em");
-        Version(x => x.Version).Column("version"); // concorrencia otimista (lost update), README §7.3
+        Table("PRODUTO");
+
+        Id(x => x.Id).Column("ID").GeneratedBy.Identity();
+        
+        Map(x => x.Nome).Column("NOME").Length(100).Not.Nullable();
+        Map(x => x.Preco).Column("PRECO").Precision(18).Scale(2).Not.Nullable();
+        Map(x => x.Situacao).Column("SITUACAO").CustomType<int>().Not.Nullable();
     }
 }

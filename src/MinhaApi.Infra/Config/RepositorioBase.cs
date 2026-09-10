@@ -47,10 +47,10 @@ public class RepositorioBase<TEntidade>(ISession session) : IRepositorioBase<TEn
         }
     }
 
-    public virtual async Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default)
+    public virtual async Task<TEntidade> RecuperarAsync(int id, CancellationToken cancellationToken = default)
         => await Session.GetAsync<TEntidade>(id, cancellationToken);
 
-    public virtual async Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default)
+    public virtual async Task<TEntidade> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default)
         => await Session.Query<TEntidade>().Where(expressao).FirstOrDefaultAsync(cancellationToken);
 
     public virtual Task<PaginacaoConsulta<TEntidade>> ListarAsync(
@@ -63,6 +63,26 @@ public class RepositorioBase<TEntidade>(ISession session) : IRepositorioBase<TEn
                 ? query
                 : query.OrderBy(ClausulaOrdenacao(paginacao.CpOrd, paginacao.TpOrd)),
             cancellationToken);
+
+    // Overload que recebe o IQueryable JA FILTRADO (via IProdutoRepository.Filtrar,
+    // por exemplo) - so aplica paginacao e ordenacao por um unico campo em cima dele.
+    public virtual async Task<PaginacaoConsulta<TEntidade>> ListarAsync(
+        IQueryable<TEntidade> query, int qt, int pg, string cpOrd, TipoOrdenacao tpOrd, CancellationToken cancellationToken)
+    {
+        var totalItens = await query.CountAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(cpOrd))
+        {
+            query = query.OrderBy(ClausulaOrdenacao(cpOrd, tpOrd));
+        }
+
+        var itens = await query
+            .Skip((pg - 1) * qt)
+            .Take(qt)
+            .ToListAsync(cancellationToken);
+
+        return new PaginacaoConsulta<TEntidade>(itens, totalItens, pg, qt);
+    }
 
     public virtual Task<PaginacaoConsulta<TEntidade>> ListarAsync(
         int qt,

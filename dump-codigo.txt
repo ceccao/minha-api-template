@@ -52,6 +52,7 @@ public static class RateLimitConfiguration
 
 
 ===== src\MinhaApi.Api\Configuration\SwaggerConfiguration.cs =====
+using System.Reflection;
 using Microsoft.OpenApi;
 
 namespace MinhaApi.Api.Configuration;
@@ -68,21 +69,28 @@ public static class SwaggerConfiguration
                 Title = "MinhaApi",
                 Version = "v1"
             });
+
+            // Le o arquivo XML gerado pelo GenerateDocumentationFile (csproj) e
+            // usa os "/// <summary>" das controllers como descricao no Swagger.
+            var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFilename);
+
+            if (File.Exists(xmlPath))
+            {
+                options.IncludeXmlComments(xmlPath);
+            }
         });
 
         return services;
     }
 }
 
-
 ===== src\MinhaApi.Api\Controllers\V1\Produtos\ProdutosController.cs =====
-using Mapster;
 using Microsoft.AspNetCore.Mvc;
 using MinhaApi.Application.Common;
 using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
 using MinhaApi.Application.Produtos.Services.Interfaces;
-using MinhaApi.Domain.Produtos.Commands;
 
 namespace MinhaApi.Api.Controllers.V1.Produtos;
 
@@ -94,69 +102,56 @@ public class ProdutosController(IProdutoService produtoService) : ControllerBase
     /// <summary>
     /// Lista produtos com filtros opcionais e paginação.
     /// </summary>
-    /// <param name="request"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
+    /// <param name="request">Parâmetros de paginação, ordenação e filtro.</param>
+    /// <param name="cancellationToken"></param>
     [HttpGet]
     [ProducesResponseType<PagedResult<ProdutoResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ListarAsync([FromQuery] ListarProdutosRequest request, CancellationToken cancellationToken)
-    {
-        return Ok(await produtoService.ListarAsync(request, cancellationToken));
-    }
+        => Ok(await produtoService.ListarAsync(request, cancellationToken));
 
     /// <summary>
     /// Recupera um produto pelo seu ID.
     /// </summary>
-    /// <param name="id"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpGet("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RecuperarAsync(int id, CancellationToken cancellationToken)
-    {
-        return Ok(await produtoService.RecuperarAsync(id, cancellationToken));
-    }
+        => Ok(await produtoService.RecuperarAsync(id, cancellationToken));
 
     /// <summary>
     /// Cria um novo produto.
     /// </summary>
-    /// <param name="request"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
+    /// <param name="request">Dados do produto a ser criado.</param>
+    /// <param name="cancellationToken"></param>
     [HttpPost]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> InserirAsync(CriarProdutoRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> InserirAsync(ProdutoRequest request, CancellationToken cancellationToken)
     {
-        var command = request.Adapt<CriarProdutoCommand>();
-        var produto = await produtoService.CriarAsync(command, cancellationToken);
-        return CreatedAtAction(nameof(InserirAsync), new { id = produto.Id }, produto);
+        var produto = await produtoService.InserirAsync(request, cancellationToken);
+        return CreatedAtAction(nameof(RecuperarAsync), new { id = produto.Id }, produto);
     }
 
     /// <summary>
     /// Atualiza um produto existente.
     /// </summary>
-    /// <param name="id"></param>
-    /// <param name="request"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="request">Novos dados do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpPut("{id:int}")]
     [ProducesResponseType<ProdutoResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> EditarAsync(int id, AtualizarProdutoRequest request, CancellationToken ct)
-    {
-        var command = new AtualizarProdutoCommand(id, request.Nome, request.Preco);
-        return Ok(await produtoService.EditarAsync(command, ct));
-    }
-
+    public async Task<IActionResult> EditarAsync(int id, ProdutoRequest request, CancellationToken cancellationToken)
+        => Ok(await produtoService.EditarAsync(id, request, cancellationToken));
+    
     /// <summary>
     /// Exclui um produto existente.
     /// </summary>
-    /// <param name="id"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
+    /// <param name="id">Identificador do produto.</param>
+    /// <param name="cancellationToken"></param>
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -214,7 +209,14 @@ builder.Services
 // 4. Controllers
 // (validacao de FluentValidation e feita explicitamente na Application - ver
 // ProdutoService - em vez de um filtro automatico de MVC)
-builder.Services.AddControllers();
+// SuppressAsyncSuffixInActionNames = false: mantem o nome da action IGUAL ao nome
+// do metodo (com "Async"), senao nameof(RecuperarAsync) no CreatedAtAction nao
+// bate com o nome real da rota (que por padrao vira so "Recuperar") - "No route
+// matches the supplied values".
+builder.Services.AddControllers(options =>
+{
+    options.SuppressAsyncSuffixInActionNames = false;
+});
 
 // 5. Swagger (registro)
 builder.Services.AddSwaggerConfigurado();
@@ -281,7 +283,6 @@ app.Lifetime.ApplicationStopping.Register(() =>
 
 app.Run();
 
-
 ===== src\MinhaApi.Application\Common\PagedResult.cs =====
 namespace MinhaApi.Application.Common;
 
@@ -334,10 +335,6 @@ using MinhaApi.Domain.Abstractions;
 
 namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
 
-// Substitui o antigo PaginacaoRequest (so pagina/tamanho) e o ProdutoFilter (so
-// filtros) - agora e um objeto so por entidade, com ordenacao padrao fixada no
-// construtor (o front so troca TpOrd ao clicar numa coluna, nao manda qualquer
-// nome de campo livre).
 public class ListarProdutosRequest : PaginacaoFiltro
 {
     public string? Nome { get; set; }
@@ -355,215 +352,187 @@ namespace MinhaApi.Application.Produtos.DataTransfer.Requests;
 
 public class ProdutoRequest
 {
-    public string Nome {get; set;}
-};
-
+    public required string Nome { get; set; }
+    public decimal Preco { get; set; }
+}
 
 ===== src\MinhaApi.Application\Produtos\DataTransfer\Responses\ProdutoResponse.cs =====
+using MinhaApi.CrossCutting.Enums;
+
 namespace MinhaApi.Application.Produtos.DataTransfer.Responses;
 
-public record ProdutoResponse(
-    long Id,
-    string Nome,
-    decimal Preco,
-    bool Ativo,
-    DateTime CriadoEm,
-    DateTime? AtualizadoEm);
-
+public class ProdutoResponse
+{
+    public int Id { get; set; }
+    public string? Nome { get; set; }
+    public decimal Preco { get; set; }
+    public Situacao Situacao { get; set; }
+}
 
 ===== src\MinhaApi.Application\Produtos\Profiles\ProdutoProfile.cs =====
 using Mapster;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
+using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 
 namespace MinhaApi.Application.Produtos.Profiles;
 
-// Registrada via TypeAdapterConfig.GlobalSettings.Scan(assembly) na FASE 10 (IoC).
-public class ProdutoMappingConfig : IRegister
+public class ProdutoProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        // Produto -> ProdutoResponse ja e coberto por convencao (mesmos nomes de
-        // propriedade). Request -> Command tambem e coberto por convencao quando os
-        // campos batem (CriarProdutoRequest -> CriarProdutoCommand). Esta classe fica
-        // aqui pronta pra quando algum desses mapeamentos precisar de regra customizada.
         config.NewConfig<Produto, ProdutoResponse>();
+        config.NewConfig<ProdutoRequest, ProdutoCommand>();
     }
 }
 
-
 ===== src\MinhaApi.Application\Produtos\Services\Interfaces\IProdutoService.cs =====
-using MinhaApi.Application.Common;
 using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
-using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Domain.Abstractions;
 
 namespace MinhaApi.Application.Produtos.Services.Interfaces;
 
 public interface IProdutoService
 {
     Task<ProdutoResponse> RecuperarAsync(int id, CancellationToken cancellationToken);
-    Task<PagedResult<ProdutoResponse>> ListarAsync(ListarProdutosRequest request, CancellationToken cancellationToken);
-    Task<ProdutoResponse> CriarAsync(CriarProdutoCommand command, CancellationToken cancellationToken);
-    Task<ProdutoResponse> EditarAsync(AtualizarProdutoCommand command, CancellationToken cancellationToken);
-    Task ExcluirAsync(int id, CancellationToken cancellationToken);
+    Task<PaginacaoConsulta<ProdutoResponse>> ListarAsync(ListarProdutosRequest request, CancellationToken cancellationToken);
+    Task<ProdutoResponse> InserirAsync(ProdutoRequest request, CancellationToken cancellationToken);
+    Task<ProdutoResponse> EditarAsync(int id, ProdutoRequest request, CancellationToken cancellationToken);
+    Task<ProdutoResponse> ExcluirAsync(int id, CancellationToken cancellationToken);
 }
 
 ===== src\MinhaApi.Application\Produtos\Services\ProdutoService.cs =====
 using FluentValidation;
 using Mapster;
-using MinhaApi.Application.Common;
 using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.DataTransfer.Responses;
 using MinhaApi.Application.Produtos.Services.Interfaces;
 using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Domain.Produtos.Repositories.Filters;
+using MinhaApi.Domain.Produtos.Services.Interfaces;
 
 namespace MinhaApi.Application.Produtos.Services;
 
 public class ProdutoService(
-    IProdutoRepository repository,
-    IValidator<CriarProdutoCommand> criarValidator,
-    IValidator<AtualizarProdutoCommand> atualizarValidator) : IProdutoService
+                            IProdutosService produtosService,
+                            IProdutoRepository produtoRepository,
+                            IUnitOfWork unitOfWork) : IProdutoService
 {
-    public async Task<ProdutoResponse> ObterPorIdAsync(int id, CancellationToken cancellationToken = default)
+    public async Task<ProdutoResponse> RecuperarAsync(int id, CancellationToken cancellationToken)
     {
-        var produto = await repository.RecuperarAsync(id, cancellationToken)
-            ?? throw new NaoEncontradoException<Produto>(id);
-
-        // TODO (FASE 17 - IDOR, README §6.3): quando a autenticacao existir, validar
-        // aqui se o usuario logado (UsuarioLogadoId/TenantId) tem posse deste recurso
-        // antes de retornar - lancar AcessoNegadoException caso contrario.
-
+        Produto produto = await produtosService.ValidarAsync(id, cancellationToken);
         return produto.Adapt<ProdutoResponse>();
     }
 
-    public async Task<PagedResult<ProdutoResponse>> ObterTodosAsync(ListarProdutosRequest request, CancellationToken cancellationToken = default)
+    public async Task<PaginacaoConsulta<ProdutoResponse>> ListarAsync(ListarProdutosRequest request, CancellationToken cancellationToken)
     {
-        // Um unico predicado combinado, com cada condicao opcional "neutralizada"
-        // quando o filtro correspondente nao foi informado - nao precisa de
-        // biblioteca de combinacao de Expression, o NHibernate resolve isso como
-        // um WHERE so com os AND/OR corretos.
-        var resultado = await repository.ListarAsync(
-            request,
-            p =>
-                (string.IsNullOrWhiteSpace(request.Nome) || p.Nome.Contains(request.Nome)) &&
-                (!request.PrecoMinimo.HasValue || p.Preco >= request.PrecoMinimo.GetValueOrDefault()) &&
-                (!request.PrecoMaximo.HasValue || p.Preco <= request.PrecoMaximo.GetValueOrDefault()) &&
-                (!request.Ativo.HasValue || p.Ativo == request.Ativo.GetValueOrDefault()),
-            cancellationToken);
+        ProdutoListarFilter filter = request.Adapt<ProdutoListarFilter>();
+        IQueryable<Produto> query = produtoRepository.Filtrar(filter);
+        PaginacaoConsulta<Produto> resultado = await produtoRepository
+            .ListarAsync(
+                query,
+                request.Qt,
+                request.Pg,
+                request.CpOrd,
+                request.TpOrd,
+                cancellationToken);
 
-        var itens = resultado.Itens.Adapt<List<ProdutoResponse>>();
-
-        return new PagedResult<ProdutoResponse>(itens, resultado.Pagina, resultado.TamanhoPagina, resultado.TotalItens);
+            return resultado.Adapt<PaginacaoConsulta<ProdutoResponse>>();
     }
 
-    public async Task<ProdutoResponse> CriarAsync(CriarProdutoCommand command, CancellationToken cancellationToken = default)
+    public async Task<ProdutoResponse> InserirAsync(ProdutoRequest request, CancellationToken cancellationToken)
     {
-        var validacao = await criarValidator.ValidateAsync(command, cancellationToken);
-        if (!validacao.IsValid)
+        try
         {
-            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+            ProdutoCommand command = request.Adapt<ProdutoCommand>();
+            unitOfWork.BeginTransaction();
+            Produto produto = await produtosService.InserirAsync(command, cancellationToken);
+            await unitOfWork.CommitAsync(cancellationToken);
+            ProdutoResponse response = produto.Adapt<ProdutoResponse>();
+            return response;
         }
-
-        var produto = new Produto(command.Nome, command.Preco);
-
-        await repository.InserirAsync(produto, cancellationToken);
-
-        return produto.Adapt<ProdutoResponse>();
-    }
-
-    public async Task<ProdutoResponse> AtualizarAsync(AtualizarProdutoCommand command, CancellationToken cancellationToken = default)
-    {
-        var validacao = await atualizarValidator.ValidateAsync(command, cancellationToken);
-        if (!validacao.IsValid)
+        catch
         {
-            throw new EntidadeInvalidaException(validacao.Errors.Select(e => e.ErrorMessage));
+            await unitOfWork.RollbackAsync(cancellationToken);
+            throw;
         }
-
-        var produto = await repository.RecuperarAsync(command.Id, cancellationToken)
-            ?? throw new NaoEncontradoException<Produto>(command.Id);
-
-        produto.AtualizarNome(command.Nome);
-        produto.AtualizarPreco(command.Preco);
-
-        await repository.EditarAsync(produto, cancellationToken);
-
-        return produto.Adapt<ProdutoResponse>();
     }
 
-    public async Task ExcluirAsync(int id, CancellationToken cancellationToken = default)
+    public async Task<ProdutoResponse> EditarAsync(int id, ProdutoRequest request, CancellationToken cancellationToken)
     {
-        var produto = await repository.RecuperarAsync(id, cancellationToken)
-            ?? throw new NaoEncontradoException<Produto>(id);
-
-        produto.Desativar();
-        await repository.EditarAsync(produto, cancellationToken);
-    }
-
-    public async Task<Result<ProdutoResponse>> AtualizarPrecoComRetryAsync(
-        int id, decimal novoPreco, int maxTentativas = 3, CancellationToken cancellationToken = default)
-    {
-        for (var tentativa = 1; tentativa <= maxTentativas; tentativa++)
+        try
         {
-            try
-            {
-                var produto = await repository.RecuperarAsync(id, cancellationToken)
-                    ?? throw new NaoEncontradoException<Produto>(id);
-
-                produto.AtualizarPreco(novoPreco);
-                await repository.EditarAsync(produto, cancellationToken);
-
-                return Result.Ok(produto.Adapt<ProdutoResponse>());
-            }
-            catch (ConflitoException)
-            {
-                if (tentativa == maxTentativas)
-                {
-                    return Result.Falha<ProdutoResponse>(
-                        $"Não foi possível atualizar o preço após {maxTentativas} tentativas devido a conflitos concorrentes simultâneos.");
-                }
-            }
+            ProdutoCommand command = request.Adapt<ProdutoCommand>();
+            unitOfWork.BeginTransaction();
+            Produto produto = await produtosService.EditarAsync(id, command, cancellationToken);
+            await unitOfWork.CommitAsync(cancellationToken);
+            ProdutoResponse response = produto.Adapt<ProdutoResponse>();
+            return response;
         }
+        catch
+        {
+            await unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
 
-        return Result.Falha<ProdutoResponse>("Erro inesperado ao atualizar o preço.");
+    public async Task<ProdutoResponse> ExcluirAsync(int id, CancellationToken cancellationToken)
+    {
+       try
+        {
+            unitOfWork.BeginTransaction();
+            Produto produto = await produtosService.AtivarAsync(id, cancellationToken);
+            await unitOfWork.CommitAsync(cancellationToken);
+            ProdutoResponse response = produto.Adapt<ProdutoResponse>();
+            return response;
+        }
+        catch
+        {
+            await unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 }
 
 ===== src\MinhaApi.Application\Produtos\Validators\AtualizarProdutoCommandValidator.cs =====
 using FluentValidation;
-using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 
 namespace MinhaApi.Application.Produtos.Validators;
 
-public class AtualizarProdutoCommandValidator : AbstractValidator<AtualizarProdutoCommand>
+public class AtualizarProdutoRequestValidator : AbstractValidator<ProdutoRequest>
 {
-    public AtualizarProdutoCommandValidator()
+    public AtualizarProdutoRequestValidator()
     {
         RuleFor(x => x.Nome)
             .NotEmpty().WithMessage("Nome é obrigatório.")
+            .MinimumLength(3).WithMessage("Nome deve ter no mínimo 3 caracteres.")
             .MaximumLength(100).WithMessage("Nome deve ter no máximo 100 caracteres.");
 
         RuleFor(x => x.Preco)
             .GreaterThanOrEqualTo(0).WithMessage("Preço não pode ser negativo.");
     }
 }
-
 
 ===== src\MinhaApi.Application\Produtos\Validators\CriarProdutoCommandValidator.cs =====
 using FluentValidation;
-using MinhaApi.Domain.Produtos.Commands;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 
 namespace MinhaApi.Application.Produtos.Validators;
 
-public class CriarProdutoCommandValidator : AbstractValidator<CriarProdutoCommand>
+public class CriarProdutoRequestValidator : AbstractValidator<ProdutoRequest>
 {
-    public CriarProdutoCommandValidator()
+    public CriarProdutoRequestValidator()
     {
         RuleFor(x => x.Nome)
             .NotEmpty().WithMessage("Nome é obrigatório.")
+            .MinimumLength(3).WithMessage("Nome deve ter no mínimo 3 caracteres.")
             .MaximumLength(100).WithMessage("Nome deve ter no máximo 100 caracteres.");
 
         RuleFor(x => x.Preco)
@@ -571,6 +540,20 @@ public class CriarProdutoCommandValidator : AbstractValidator<CriarProdutoComman
     }
 }
 
+===== src\MinhaApi.CrossCutting\Enums\Situacao.cs =====
+using System.ComponentModel;
+ 
+namespace MinhaApi.CrossCutting.Enums;
+ 
+public enum Situacao
+{
+    [Description("Inativo")]
+    Inativo = 0,
+ 
+    [Description("Ativo")]
+    Ativo = 1
+}
+ 
 
 ===== src\MinhaApi.CrossCutting\Exceptions\AcessoNegadoException.cs =====
 using Microsoft.AspNetCore.Http;
@@ -814,29 +797,36 @@ public interface IRepositorioBase<TEntidade> where TEntidade : class
     Task EditarAsync(TEntidade entidade, CancellationToken cancellationToken = default);
     Task ExcluirAsync(TEntidade entidade, CancellationToken cancellationToken = default);
     Task ExcluirAsync(IEnumerable<TEntidade> entidades, CancellationToken cancellationToken = default);
-    Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default);
-    Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default);
+    Task<TEntidade> RecuperarAsync(int id, CancellationToken cancellationToken = default);
+    Task<TEntidade> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default);
 
     Task<PaginacaoConsulta<TEntidade>> ListarAsync(
         PaginacaoFiltro paginacao,
-        Expression<Func<TEntidade, bool>>? filtro = null,
+        Expression<Func<TEntidade, bool>> filtro = null,
         CancellationToken cancellationToken = default);
+    Task<PaginacaoConsulta<TEntidade>> ListarAsync(IQueryable<TEntidade> query, int qt, int pg, string cpOrd, TipoOrdenacao tpOrd, CancellationToken cancellationToken);
 
     Task<PaginacaoConsulta<TEntidade>> ListarAsync(
         int qt,
         int pg,
         (string Campo, TipoOrdenacao Tipo)[] ordenacao,
-        Expression<Func<TEntidade, bool>>? filtro = null,
+        Expression<Func<TEntidade, bool>> filtro = null,
         CancellationToken cancellationToken = default);
+}
+
+===== src\MinhaApi.Domain\Abstractions\IUnitOfWork.cs =====
+namespace MinhaApi.Domain.Abstractions;
+
+public interface IUnitOfWork
+{
+    void BeginTransaction();
+    Task CommitAsync(CancellationToken cancellationToken = default);
+    Task RollbackAsync(CancellationToken cancellationToken = default);
 }
 
 ===== src\MinhaApi.Domain\Abstractions\PaginacaoConsulta.cs =====
 namespace MinhaApi.Domain.Abstractions;
 
-// Resultado paginado no nivel de Domain/Infra - distinto do PagedResult<T> que
-// existe na Application (esse aqui carrega entidades de dominio, o outro carrega
-// DTOs de resposta). Domain/Infra nao podem depender de Application (regra de
-// dependencia, README §2.1), entao precisa do proprio tipo aqui.
 public class PaginacaoConsulta<TEntidade>(IReadOnlyList<TEntidade> itens, int totalItens, int pagina, int tamanhoPagina)
 {
     public IReadOnlyList<TEntidade> Itens { get; } = itens;
@@ -849,11 +839,6 @@ public class PaginacaoConsulta<TEntidade>(IReadOnlyList<TEntidade> itens, int to
 ===== src\MinhaApi.Domain\Abstractions\PaginacaoFiltro.cs =====
 namespace MinhaApi.Domain.Abstractions;
 
-// Consolida quantidade/pagina/ordenacao num objeto so, usado pelo ListarAsync do
-// IRepositorioBase<T>. Nao tem metodo de montar SQL/ORDER BY como texto de proposito
-// - isso seria concatenar string em SQL (README §6.1, SQL Injection). A ordenacao de
-// verdade e resolvida com System.Linq.Dynamic.Core dentro do RepositorioBase, que
-// valida o nome da propriedade contra a entidade antes de montar a query.
 public class PaginacaoFiltro
 {
     private const int QuantidadeMaxima = 100;
@@ -865,8 +850,7 @@ public class PaginacaoFiltro
     public int Qt
     {
         get => _qt;
-        // Teto de 100 (protecao contra payload malicioso/DoS, README §6.2). Piso de 1
-        // adicionado - valor negativo ou zero quebraria o Skip/Take no repositorio.
+
         set => _qt = value switch
         {
             < 1 => QuantidadePadrao,
@@ -901,73 +885,46 @@ public enum TipoOrdenacao
     Descendente
 }
 
-===== src\MinhaApi.Domain\Common\EntidadeBase.cs =====
-namespace MinhaApi.Domain.Common;
+===== src\MinhaApi.Domain\Produtos\Commands\ProdutoCommand.cs =====
+namespace MinhaApi.Domain.Produtos.Commands;
 
-public abstract class EntidadeBase
+public class ProdutoCommand
 {
-    public virtual int Id { get; protected set; }
-    public virtual bool Ativo { get; protected set; } = true;
-    public virtual DateTime CriadoEm { get; protected set; } = DateTime.UtcNow;
-    public virtual DateTime? AtualizadoEm { get; protected set; }
-    public virtual int Version { get; protected set; }
+    public string Nome { get; protected set; }
+    public decimal Preco { get; protected set; }
 
-    public virtual void Desativar()
-    {
-        Ativo = false;
-        AtualizadoEm = DateTime.UtcNow;
-    }
 }
 
-
-===== src\MinhaApi.Domain\Produtos\Commands\EditarProdutoCommand.cs =====
-namespace MinhaApi.Domain.Produtos.Commands;
-
-// Carrega o Id junto (diferente do Request, que recebe o Id separado via rota) -
-// um Command representa a intencao COMPLETA de uma acao, entao fica autocontido.
-public class EditarProdutoCommand()
-{
-    public int Id {get; protected set;}
-    public string Nome {get; protected set;} = string.Empty;
-    public decimal Preco {get; protected set;}
-};
-
-===== src\MinhaApi.Domain\Produtos\Commands\InserirProdutoCommand.cs =====
-namespace MinhaApi.Domain.Produtos.Commands;
-
-public class InserirProdutoCommand()
-{
-    public string Nome {get; protected set;} = string.Empty;
-    public decimal Preco {get; protected set;}
-};
-
-
 ===== src\MinhaApi.Domain\Produtos\Entities\Produto.cs =====
-using System.ComponentModel.DataAnnotations;
-using MinhaApi.Domain.Common;
-using System;
+
+using MinhaApi.CrossCutting.Enums;
 
 namespace MinhaApi.Domain.Produtos.Entities;
 
-public class Produto : EntidadeBase
+public class Produto
 {
-    public virtual string Nome { get; protected set; } = string.Empty;
+    public virtual int Id { get; protected set; }
+    public virtual string Nome { get; protected set; }
     public virtual decimal Preco { get; protected set; }
+    public virtual Situacao Situacao { get; protected set; }
 
-    protected Produto (){}
+    protected Produto() { }
 
     public Produto(string nome, decimal preco)
     {
         SetNome(nome);
         SetPreco(preco);
+
+        Ativar();
     }
 
     public virtual void SetNome(string nome)
     {
         if (string.IsNullOrWhiteSpace(nome))
             throw new ArgumentException("Nome do produto é obrigatório.", nameof(nome));
-        if (nome.Length < 3 && nome.Length > 100)
-            throw new ArgumentException("Nome deve ter no mínimo 3 e máximo 100 caracteres.");
+
+        if (nome.Length < 3 || nome.Length > 100)
+            throw new ArgumentException("Nome deve ter no mínimo 3 e máximo 100 caracteres.", nameof(nome));
 
         Nome = nome;
     }
@@ -979,74 +936,113 @@ public class Produto : EntidadeBase
 
         Preco = preco;
     }
+    public virtual void Ativar()
+    {
+        Situacao = Situacao.Ativo;
+    }
+
+    public virtual void Inativar()
+    {
+        Situacao = Situacao.Inativo;
+    }
+}
+
+===== src\MinhaApi.Domain\Produtos\Repositories\Filters\ProdutoListarFilter.cs =====
+namespace MinhaApi.Domain.Produtos.Repositories.Filters;
+
+public class ProdutoListarFilter
+{
+    public string Nome { get; set; }
 }
 
 ===== src\MinhaApi.Domain\Produtos\Repositories\IProdutoRepository.cs =====
 using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Entities;
+using MinhaApi.Domain.Produtos.Repositories.Filters;
 
 namespace MinhaApi.Domain.Produtos.Repositories;
 
-// Vazia de proposito por enquanto: RecuperarAsync(predicado) e ListarAsync
-// (paginado/ordenado, com filtro opcional) do IRepositorioBase<T> ja cobrem os
-// casos de consulta que existiam aqui antes (ObterComFiltroAsync). Ganha metodos
-// proprios quando surgir uma consulta que genuinamente nao da pra expressar como
-// predicado simples.
 public interface IProdutoRepository : IRepositorioBase<Produto>
 {
+    IQueryable<Produto> Filtrar(ProdutoListarFilter filtro);
 }
-
 
 ===== src\MinhaApi.Domain\Produtos\Services\Interfaces\IProdutosService.cs =====
 using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 
-namespace MinhaApi.Domain.Produtos.Services.Interfaces
+namespace MinhaApi.Domain.Produtos.Services.Interfaces;
+
+public interface IProdutosService
 {
-    public interface IProdutosService
-    {
-        Task RecuperarAsync(int id, CancellationToken cancellationToken);
-        Task<Produto> CriarAsync(InserirProdutoCommand command, CancellationToken cancellationToken);
-        Task<Produto> EditarAsync(EditarProdutoCommand command, CancellationToken cancellationToken);
-        Task ExcluirAsync(int id, CancellationToken cancellationToken);
-    }
+    Task<Produto> ValidarAsync(int id, CancellationToken cancellationToken);
+    Task<Produto> InserirAsync(ProdutoCommand command, CancellationToken cancellationToken);
+    Task<Produto> EditarAsync(int id, ProdutoCommand command, CancellationToken cancellationToken);
+    Task<Produto> AtivarAsync(int id, CancellationToken cancellationToken);
+    Task<Produto> InativarAsync(int id, CancellationToken cancellationToken);
 }
 
 ===== src\MinhaApi.Domain\Produtos\Services\ProdutosService.cs =====
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using MinhaApi.CrossCutting.Exceptions;
 using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 using MinhaApi.Domain.Produtos.Repositories;
 using MinhaApi.Domain.Produtos.Services.Interfaces;
 
-namespace MinhaApi.Domain.Produtos.Services
+namespace MinhaApi.Domain.Produtos.Services;
+
+public class ProdutosService(IProdutoRepository produtoRepository) : IProdutosService
 {
-    public class ProdutosService(
-        IProdutoRepository produtoRepository) : IProdutosService
+    public async Task<Produto> ValidarAsync(int id, CancellationToken cancellationToken)
     {
-        public Task<Produto> CriarAsync(InserirProdutoCommand command, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
+        Produto produto = await produtoRepository.RecuperarAsync(id, cancellationToken)
+                ?? throw new NaoEncontradoException<Produto>(id);
 
-        public Task<Produto> EditarAsync(EditarProdutoCommand command, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
+        return produto;
+    }
 
-        public Task ExcluirAsync(int id, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
+    public async Task<Produto> InserirAsync(ProdutoCommand command, CancellationToken cancellationToken)
+    {
+        Produto produto = new(
+            command.Nome, 
+            command.Preco
+            );
 
-        public async Task<Produto> RecuperarAsync(int id, CancellationToken cancellationToken)
-        {
-            Produto produto = await produtoRepository.RecuperarAsync(id, cancellationToken);
-            return produto;
-        }
+        await produtoRepository.InserirAsync(produto, cancellationToken);
+
+        return produto;
+    }
+
+    public async Task<Produto> EditarAsync(int id, ProdutoCommand command, CancellationToken cancellationToken)
+    {
+        Produto produto = await ValidarAsync(id, cancellationToken);
+
+        produto.SetNome(command.Nome);
+        produto.SetPreco(command.Preco);
+
+        await produtoRepository.EditarAsync(produto, cancellationToken);
+
+        return produto;
+    }
+
+    public async Task<Produto> AtivarAsync(int id, CancellationToken cancellationToken)
+    {
+        Produto produto = await ValidarAsync(id, cancellationToken);
+
+        produto.Ativar();
+        await produtoRepository.EditarAsync(produto, cancellationToken);
+
+        return produto;
+    }
+
+    public async Task<Produto> InativarAsync(int id, CancellationToken cancellationToken)
+    {
+        Produto produto = await ValidarAsync(id, cancellationToken);
+
+        produto.Inativar();
+        await produtoRepository.EditarAsync(produto, cancellationToken);
+
+        return produto;
     }
 }
 
@@ -1132,10 +1128,10 @@ public class RepositorioBase<TEntidade>(ISession session) : IRepositorioBase<TEn
         }
     }
 
-    public virtual async Task<TEntidade?> RecuperarAsync(int id, CancellationToken cancellationToken = default)
+    public virtual async Task<TEntidade> RecuperarAsync(int id, CancellationToken cancellationToken = default)
         => await Session.GetAsync<TEntidade>(id, cancellationToken);
 
-    public virtual async Task<TEntidade?> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default)
+    public virtual async Task<TEntidade> RecuperarAsync(Expression<Func<TEntidade, bool>> expressao, CancellationToken cancellationToken = default)
         => await Session.Query<TEntidade>().Where(expressao).FirstOrDefaultAsync(cancellationToken);
 
     public virtual Task<PaginacaoConsulta<TEntidade>> ListarAsync(
@@ -1197,6 +1193,44 @@ public class RepositorioBase<TEntidade>(ISession session) : IRepositorioBase<TEn
         => string.Join(", ", ordenacao.Select(o => ClausulaOrdenacao(o.Campo, o.Tipo)));
 }
 
+===== src\MinhaApi.Infra\Config\UnitOfWork.cs =====
+using MinhaApi.Domain.Abstractions;
+using NHibernate;
+
+namespace MinhaApi.Infra.Config;
+
+public class UnitOfWork(ISession session) : IUnitOfWork
+{
+    private ITransaction? _transacao;
+
+    public void BeginTransaction()
+    {
+        _transacao = session.BeginTransaction();
+    }
+
+    public async Task CommitAsync(CancellationToken cancellationToken = default)
+    {
+        if (_transacao is null)
+        {
+            return;
+        }
+
+        await _transacao.CommitAsync(cancellationToken);
+        _transacao = null;
+    }
+
+    public async Task RollbackAsync(CancellationToken cancellationToken = default)
+    {
+        if (_transacao is null)
+        {
+            return;
+        }
+
+        await _transacao.RollbackAsync(cancellationToken);
+        _transacao = null;
+    }
+}
+
 ===== src\MinhaApi.Infra\Produtos\Mappings\ProdutoMap.cs =====
 using FluentNHibernate.Mapping;
 using MinhaApi.Domain.Produtos.Entities;
@@ -1207,21 +1241,20 @@ public class ProdutoMap : ClassMap<Produto>
 {
     public ProdutoMap()
     {
-        Table("produto");
-        Id(x => x.Id).Column("id").GeneratedBy.Identity();
-        Map(x => x.Nome).Column("nome").Length(100).Not.Nullable();
-        Map(x => x.Preco).Column("preco").Precision(18).Scale(2).Not.Nullable();
-        Map(x => x.Ativo).Column("ativo").Not.Nullable();
-        Map(x => x.CriadoEm).Column("criado_em").Not.Nullable();
-        Map(x => x.AtualizadoEm).Column("atualizado_em");
-        Version(x => x.Version).Column("version"); // concorrencia otimista (lost update), README §7.3
+        Table("PRODUTO");
+
+        Id(x => x.Id).Column("ID").GeneratedBy.Identity();
+        
+        Map(x => x.Nome).Column("NOME").Length(100).Not.Nullable();
+        Map(x => x.Preco).Column("PRECO").Precision(18).Scale(2).Not.Nullable();
+        Map(x => x.Situacao).Column("SITUACAO").CustomType<int>().Not.Nullable();
     }
 }
-
 
 ===== src\MinhaApi.Infra\Produtos\Repositories\ProdutoRepository.cs =====
 using MinhaApi.Domain.Produtos.Entities;
 using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Domain.Produtos.Repositories.Filters;
 using MinhaApi.Infra.Config;
 using NHibernate;
 
@@ -1229,8 +1262,18 @@ namespace MinhaApi.Infra.Produtos.Repositories;
 
 public class ProdutoRepository(ISession session) : RepositorioBase<Produto>(session), IProdutoRepository
 {
-}
+    public IQueryable<Produto> Filtrar(ProdutoListarFilter filtro)
+    {
+        var query = Session.Query<Produto>();
 
+        if (!string.IsNullOrWhiteSpace(filtro.Nome))
+        {
+            query = query.Where(p => p.Nome.Contains(filtro.Nome));
+        }
+
+        return query;
+    }
+}
 
 ===== src\MinhaApi.IoC\ApplicationDependencyInjection.cs =====
 using FluentValidation;
@@ -1240,6 +1283,8 @@ using MinhaApi.Application.Produtos.Profiles;
 using MinhaApi.Application.Produtos.Services;
 using MinhaApi.Application.Produtos.Services.Interfaces;
 using MinhaApi.Application.Produtos.Validators;
+using MinhaApi.Domain.Produtos.Services;
+using MinhaApi.Domain.Produtos.Services.Interfaces;
 
 namespace MinhaApi.IoC;
 
@@ -1247,16 +1292,21 @@ public static class ApplicationDependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        // Domain Service - a logica de negocio (Criar/Editar/Excluir) mora aqui.
+        // A Service da Application vira so um wrapper fino de transacao/validacao.
+        services.AddScoped<IProdutosService, ProdutosService>();
+
         services.AddScoped<IProdutoService, ProdutoService>();
 
-        services.AddValidatorsFromAssemblyContaining<CriarProdutoCommandValidator>();
+        // Validators agora sao dos Requests (Application), nao mais dos Commands
+        // (Domain) - evita o Domain precisar referenciar o FluentValidation.
+        services.AddValidatorsFromAssemblyContaining<CriarProdutoRequestValidator>();
 
-        TypeAdapterConfig.GlobalSettings.Scan(typeof(ProdutoMappingConfig).Assembly);
+        TypeAdapterConfig.GlobalSettings.Scan(typeof(ProdutoProfile).Assembly);
 
         return services;
     }
 }
-
 
 ===== src\MinhaApi.IoC\CrossCuttingDependencyInjection.cs =====
 using Microsoft.Extensions.Configuration;
@@ -1295,6 +1345,7 @@ public static class DependencyInjection
 ===== src\MinhaApi.IoC\InfraDependencyInjection.cs =====
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Repositories;
 using MinhaApi.Infra.Config;
 using MinhaApi.Infra.Produtos.Repositories;
@@ -1314,12 +1365,16 @@ public static class InfraDependencyInjection
         // ISession: Scoped, UMA por requisicao HTTP. NUNCA Singleton (README §7.1).
         services.AddScoped(provider => provider.GetRequiredService<ISessionFactory>().OpenSession());
 
+        // UnitOfWork tambem Scoped - precisa usar a MESMA ISession da requisicao,
+        // senao a transacao seria aberta numa sessao diferente da que os
+        // repositorios estao usando.
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+
         services.AddScoped<IProdutoRepository, ProdutoRepository>();
 
         return services;
     }
 }
-
 
 ===== src\MinhaApi.Jobs\Class1.cs =====
 namespace MinhaApi.Jobs;
@@ -1345,6 +1400,7 @@ public class UnitTest1
 
 ===== tests\MinhaApi.Tests.Unit\Produtos\Entities\ProdutoTests.cs =====
 using AwesomeAssertions;
+using MinhaApi.CrossCutting.Enums;
 using MinhaApi.Domain.Produtos.Entities;
 using Xunit;
 
@@ -1359,15 +1415,24 @@ public class ProdutoTests
 
         produto.Nome.Should().Be("Teclado Mecânico");
         produto.Preco.Should().Be(350.00m);
-        produto.Ativo.Should().BeTrue();
-        produto.Version.Should().Be(0);
-        produto.AtualizadoEm.Should().BeNull();
+        produto.Situacao.Should().Be(Situacao.Ativo);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public void ConstructorComNomeVazioOuEmBrancoDeveLancarArgumentException(string nomeInvalido)
+    {
+        var acao = () => new Produto(nomeInvalido, 100m);
+
+        acao.Should().Throw<ArgumentException>()
+            .Where(ex => ex.ParamName == "nome");
+    }
+
+    [Theory]
+    [InlineData("ab")]
+    [InlineData("Produto com nome bem longo que ultrapassa exatamente o limite de cem caracteres permitidos no campo nome")]
+    public void ConstructorComNomeForaDoTamanhoPermitidoDeveLancarArgumentException(string nomeInvalido)
     {
         var acao = () => new Produto(nomeInvalido, 100m);
 
@@ -1385,58 +1450,66 @@ public class ProdutoTests
     }
 
     [Fact]
-    public void AtualizarNomeComNomeValidoDeveAtualizarNomeEDefinirAtualizadoEm()
+    public void SetNomeComNomeValidoDeveDefinirNome()
     {
         var produto = new Produto("Nome Original", 100m);
 
-        produto.AtualizarNome("Nome Novo");
+        produto.SetNome("Nome Novo");
 
         produto.Nome.Should().Be("Nome Novo");
-        produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
-    public void AtualizarNomeComNomeVazioDeveLancarArgumentException()
+    public void SetNomeComNomeVazioDeveLancarArgumentException()
     {
         var produto = new Produto("Nome Original", 100m);
 
-        var acao = () => produto.AtualizarNome("");
+        var acao = () => produto.SetNome("");
 
         acao.Should().Throw<ArgumentException>()
-            .Where(ex => ex.ParamName == "novoNome");
+            .Where(ex => ex.ParamName == "nome");
     }
 
     [Fact]
-    public void AtualizarPrecoComPrecoValidoDeveAtualizarPrecoEDefinirAtualizadoEm()
+    public void SetPrecoComPrecoValidoDeveDefinirPreco()
     {
         var produto = new Produto("Produto", 100m);
 
-        produto.AtualizarPreco(200m);
+        produto.SetPreco(200m);
 
         produto.Preco.Should().Be(200m);
-        produto.AtualizadoEm.Should().NotBeNull();
     }
 
     [Fact]
-    public void AtualizarPrecoComPrecoNegativoDeveLancarArgumentException()
+    public void SetPrecoComPrecoNegativoDeveLancarArgumentException()
     {
         var produto = new Produto("Produto", 100m);
 
-        var acao = () => produto.AtualizarPreco(-1m);
+        var acao = () => produto.SetPreco(-1m);
 
         acao.Should().Throw<ArgumentException>()
-            .Where(ex => ex.ParamName == "novoPreco");
+            .Where(ex => ex.ParamName == "preco");
     }
 
     [Fact]
-    public void DesativarDeveMarcarComoInativoEDefinirAtualizadoEm()
+    public void InativarDeveMarcarSituacaoComoInativo()
     {
         var produto = new Produto("Produto", 100m);
 
-        produto.Desativar();
+        produto.Inativar();
 
-        produto.Ativo.Should().BeFalse();
-        produto.AtualizadoEm.Should().NotBeNull();
+        produto.Situacao.Should().Be(Situacao.Inativo);
+    }
+
+    [Fact]
+    public void AtivarDeveMarcarSituacaoComoAtivo()
+    {
+        var produto = new Produto("Produto", 100m);
+        produto.Inativar();
+
+        produto.Ativar();
+
+        produto.Situacao.Should().Be(Situacao.Ativo);
     }
 }
 
@@ -1444,11 +1517,14 @@ public class ProdutoTests
 using AwesomeAssertions;
 using FluentValidation;
 using FluentValidation.Results;
+using MinhaApi.Application.Produtos.DataTransfer.Requests;
 using MinhaApi.Application.Produtos.Services;
 using MinhaApi.CrossCutting.Exceptions;
+using MinhaApi.Domain.Abstractions;
 using MinhaApi.Domain.Produtos.Commands;
 using MinhaApi.Domain.Produtos.Entities;
 using MinhaApi.Domain.Produtos.Repositories;
+using MinhaApi.Domain.Produtos.Services.Interfaces;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Xunit;
@@ -1457,103 +1533,128 @@ namespace MinhaApi.Tests.Unit.Produtos.Services;
 
 public class ProdutoServiceTests
 {
+    private readonly IProdutosService _produtosService = Substitute.For<IProdutosService>();
     private readonly IProdutoRepository _repository = Substitute.For<IProdutoRepository>();
-    private readonly IValidator<CriarProdutoCommand> _criarValidator = Substitute.For<IValidator<CriarProdutoCommand>>();
-    private readonly IValidator<AtualizarProdutoCommand> _atualizarValidator = Substitute.For<IValidator<AtualizarProdutoCommand>>();
+    private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
+    private readonly IValidator<CriarProdutoRequest> _criarValidator = Substitute.For<IValidator<CriarProdutoRequest>>();
+    private readonly IValidator<AtualizarProdutoRequest> _atualizarValidator = Substitute.For<IValidator<AtualizarProdutoRequest>>();
     private readonly ProdutoService _sut;
 
     public ProdutoServiceTests()
     {
-        _sut = new ProdutoService(_repository, _criarValidator, _atualizarValidator);
+        _sut = new ProdutoService(_produtosService, _repository, _unitOfWork, _criarValidator, _atualizarValidator);
 
-        _criarValidator.ValidateAsync(Arg.Any<CriarProdutoCommand>(), Arg.Any<CancellationToken>())
+        _criarValidator.ValidateAsync(Arg.Any<CriarProdutoRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValidationResult());
-        _atualizarValidator.ValidateAsync(Arg.Any<AtualizarProdutoCommand>(), Arg.Any<CancellationToken>())
+        _atualizarValidator.ValidateAsync(Arg.Any<AtualizarProdutoRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValidationResult());
     }
 
     [Fact]
-    public async Task CriarAsyncComCommandValidoDeveInserirERetornarResponseCorreto()
+    public async Task CriarAsyncComRequestValidoDeveChamarInserirAsyncERetornarResponse()
     {
-        var command = new CriarProdutoCommand("Teclado", 350m);
+        var request = new CriarProdutoRequest { Nome = "Teclado", Preco = 350m };
+        var produtoCriado = new Produto("Teclado", 350m);
+        _produtosService.InserirAsync(Arg.Any<InserirProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Returns(produtoCriado);
 
-        var resultado = await _sut.CriarAsync(command);
+        var resultado = await _sut.CriarAsync(request, CancellationToken.None);
 
         resultado.Nome.Should().Be("Teclado");
         resultado.Preco.Should().Be(350m);
-        await _repository.Received(1).InserirAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+        await _produtosService.Received(1).InserirAsync(
+            Arg.Is<InserirProdutoCommand>(c => c.Nome == "Teclado" && c.Preco == 350m),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task CriarAsyncComCommandInvalidoDeveLancarEntidadeInvalidaExceptionSemInserir()
+    public async Task CriarAsyncComRequestInvalidoDeveLancarEntidadeInvalidaExceptionSemChamarDomainService()
     {
-        var command = new CriarProdutoCommand("", 350m);
+        var request = new CriarProdutoRequest { Nome = "", Preco = 350m };
         var erros = new List<ValidationFailure> { new("Nome", "Nome é obrigatório.") };
-        _criarValidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+        _criarValidator.ValidateAsync(request, Arg.Any<CancellationToken>())
             .Returns(new ValidationResult(erros));
 
-        var acao = async () => await _sut.CriarAsync(command);
+        var acao = async () => await _sut.CriarAsync(request, CancellationToken.None);
 
         await acao.Should().ThrowAsync<EntidadeInvalidaException>();
-        await _repository.DidNotReceive().InserirAsync(Arg.Any<Produto>(), Arg.Any<CancellationToken>());
+        await _produtosService.DidNotReceive().InserirAsync(Arg.Any<InserirProdutoCommand>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ObterPorIdAsyncComIdExistenteDeveRetornarResponse()
+    public async Task RecuperarAsyncDeveRetornarResponseQuandoValidarAsyncEncontraProduto()
     {
         var produto = new Produto("Mouse", 120m);
-        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+        _produtosService.ValidarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
 
-        var resultado = await _sut.ObterPorIdAsync(1);
+        var resultado = await _sut.RecuperarAsync(1, CancellationToken.None);
 
         resultado.Nome.Should().Be("Mouse");
     }
 
     [Fact]
-    public async Task ObterPorIdAsyncComIdInexistenteDeveLancarNaoEncontradoException()
+    public async Task RecuperarAsyncDevePropagarNaoEncontradoExceptionDoValidarAsync()
     {
-        _repository.RecuperarAsync(99, Arg.Any<CancellationToken>()).Returns((Produto?)null);
+        // ValidarAsync (Domain) agora lanca a exception direto, a Application so repassa.
+        _produtosService.ValidarAsync(99, Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
 
-        var acao = async () => await _sut.ObterPorIdAsync(99);
+        var acao = async () => await _sut.RecuperarAsync(99, CancellationToken.None);
 
         await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
     }
 
     [Fact]
-    public async Task AtualizarAsyncComProdutoExistenteDeveAtualizarNomeEPreco()
+    public async Task EditarAsyncComProdutoExistenteDeveRetornarResponseAtualizado()
     {
-        var produto = new Produto("Nome Antigo", 100m);
-        var command = new AtualizarProdutoCommand(1, "Nome Novo", 200m);
-        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+        var request = new AtualizarProdutoRequest { Nome = "Nome Novo", Preco = 200m };
+        var produtoEditado = new Produto("Nome Novo", 200m);
+        _produtosService.EditarAsync(1, Arg.Any<EditarProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Returns(produtoEditado);
 
-        var resultado = await _sut.AtualizarAsync(command);
+        var resultado = await _sut.EditarAsync(1, request, CancellationToken.None);
 
         resultado.Nome.Should().Be("Nome Novo");
         resultado.Preco.Should().Be(200m);
-        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
+        await _produtosService.Received(1).EditarAsync(
+            1,
+            Arg.Is<EditarProdutoCommand>(c => c.Nome == "Nome Novo" && c.Preco == 200m),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task AtualizarAsyncComProdutoInexistenteDeveLancarNaoEncontradoException()
+    public async Task EditarAsyncDevePropagarNaoEncontradoExceptionDoDomainService()
     {
-        var command = new AtualizarProdutoCommand(99, "Nome", 100m);
-        _repository.RecuperarAsync(99, Arg.Any<CancellationToken>()).Returns((Produto?)null);
+        var request = new AtualizarProdutoRequest { Nome = "Nome", Preco = 100m };
+        _produtosService.EditarAsync(99, Arg.Any<EditarProdutoCommand>(), Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
 
-        var acao = async () => await _sut.AtualizarAsync(command);
+        var acao = async () => await _sut.EditarAsync(99, request, CancellationToken.None);
 
         await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
     }
 
     [Fact]
-    public async Task ExcluirAsyncComProdutoExistenteDeveDesativarEChamarEditarAsync()
+    public async Task ExcluirAsyncDeveChamarInativarAsync()
     {
         var produto = new Produto("Produto", 100m);
-        _repository.RecuperarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
+        _produtosService.InativarAsync(1, Arg.Any<CancellationToken>()).Returns(produto);
 
-        await _sut.ExcluirAsync(1);
+        var acao = async () => await _sut.ExcluirAsync(1, CancellationToken.None);
 
-        produto.Ativo.Should().BeFalse();
-        await _repository.Received(1).EditarAsync(produto, Arg.Any<CancellationToken>());
+        await acao.Should().NotThrowAsync();
+        await _produtosService.Received(1).InativarAsync(1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExcluirAsyncDevePropagarNaoEncontradoExceptionDoDomainService()
+    {
+        _produtosService.InativarAsync(99, Arg.Any<CancellationToken>())
+            .Throws(new NaoEncontradoException<Produto>(99));
+
+        var acao = async () => await _sut.ExcluirAsync(99, CancellationToken.None);
+
+        await acao.Should().ThrowAsync<NaoEncontradoException<Produto>>();
     }
 
     [Fact]

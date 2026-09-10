@@ -32,7 +32,14 @@ builder.Services
 // 4. Controllers
 // (validacao de FluentValidation e feita explicitamente na Application - ver
 // ProdutoService - em vez de um filtro automatico de MVC)
-builder.Services.AddControllers();
+// SuppressAsyncSuffixInActionNames = false: mantem o nome da action IGUAL ao nome
+// do metodo (com "Async"), senao nameof(RecuperarAsync) no CreatedAtAction nao
+// bate com o nome real da rota (que por padrao vira so "Recuperar") - "No route
+// matches the supplied values".
+builder.Services.AddControllers(options =>
+{
+    options.SuppressAsyncSuffixInActionNames = false;
+});
 
 // 5. Swagger (registro)
 builder.Services.AddSwaggerConfigurado();
